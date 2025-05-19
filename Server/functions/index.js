@@ -580,27 +580,35 @@ async function analyzeResponsesAndSendFinalPlan() {
 exports.sendMessagesToSubscribers = sendMessagesToSubscribers;
 
 // Export the Firebase Functions
-exports.sendWeeklyMessages = functions.pubsub
-  .schedule('45 18 * * 1') 
-  .timeZone('America/Los_Angeles') 
+exports.sendWeeklyMessages = functions
+  .region('us-central1')
+  .runWith({ platform: 'gcfv2' }) // 👈 Force GCFv2
+  .pubsub
+  .schedule('30 11 * * 1')
+  .timeZone('America/Los_Angeles')
   .onRun(async (context) => {
     console.log('Starting sendWeeklyMessages function at:', new Date().toISOString());
     return sendMessagesToSubscribers();
   });
 
-exports.suggestWeekendOutings = functions.pubsub
-  .schedule('50 18 * * 1') 
+exports.suggestWeekendOutings = functions
+  .region('us-central1')
+  .runWith({ platform: 'gcfv2' }) // 👈 Force GCFv2
+  .pubsub
+  .schedule('35 11 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async (context) => {
     console.log('Starting suggestWeekendOutings function at:', new Date().toISOString());
     return analyzeChatsAndSuggestOutings();
   });
 
-// Export the new scheduled function
-exports.sendFinalPlan = functions.pubsub
-  .schedule('55 18 * * 1') // Run at 9:10 AM every Monday
+exports.sendFinalPlan = functions
+  .region('us-central1')
+  .runWith({ platform: 'gcfv2' }) // 👈 Force GCFv2
+  .pubsub
+  .schedule('40 11 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async (context) => {
     console.log('Starting sendFinalPlan function at:', new Date().toISOString());
     return analyzeResponsesAndSendFinalPlan();
-  }); 
+  });
