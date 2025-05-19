@@ -1,11 +1,22 @@
 import Foundation
 
-func generateOpenAIResponse(prompt: String) async throws -> String {
-    // Get API key from configuration
-    guard let apiKey = Bundle.main.object(forInfoDictionaryKey: "OPENAI_API_KEY") as? String else {
-        throw NSError(domain: "OpenAIError", code: 1, userInfo: [NSLocalizedDescriptionKey: "OpenAI API key not found in configuration"])
+// MARK: - Helper to load API Key from Secrets.plist
+func loadAPIKey() -> String? {
+    guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+          let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+          let key = plist["OPENAI_API_KEY"] as? String else {
+        return nil
     }
-    
+    return key
+}
+
+// MARK: - Main OpenAI API Call
+func generateOpenAIResponse(prompt: String) async throws -> String {
+    guard let apiKey = loadAPIKey() else {
+        throw NSError(domain: "OpenAIError", code: 1, userInfo: [NSLocalizedDescriptionKey: "API key not found"])
+    }
+
     guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
         throw URLError(.badURL)
     }
@@ -15,7 +26,6 @@ func generateOpenAIResponse(prompt: String) async throws -> String {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-    // Safely encode using Swift structs instead of manual JSON
     struct Message: Codable {
         let role: String
         let content: String
@@ -28,10 +38,9 @@ func generateOpenAIResponse(prompt: String) async throws -> String {
     }
 
     let requestBody = RequestBody(
-//        model: "gpt-4o-2024-08-06",
-        model: "o4-mini-2025-04-16",
+        model: "gpt-4o",  // or "gpt-4" or "gpt-3.5-turbo"
         messages: [Message(role: "user", content: prompt)],
-        temperature: 1
+        temperature: 1.0
     )
 
     request.httpBody = try JSONEncoder().encode(requestBody)
@@ -43,7 +52,6 @@ func generateOpenAIResponse(prompt: String) async throws -> String {
         throw NSError(domain: "OpenAIError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid response: \(responseText)"])
     }
 
-    // Define a decoding structure to match the API
     struct OpenAIChoice: Codable {
         let message: Message
     }
