@@ -2,3 +2,64 @@ GoogleService-Info.plist
 .env
 Config.local.xcconfig
 Secrets.plist
+
+# Xcode
+*.xcuserstate
+*.xccheckout
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+!*.xcworkspace/xcshareddata/
+
+# Swift Package Manager
+.build/
+Packages/
+.swiftpm/xcode/package.xcworkspace/
+.swiftpm/xcode/xcshareddata/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Derived data
+DerivedData/
+
+# Archives
+*.xcarchive
+
+# iOS build
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# User-specific
+*.personal.xcscheme
+*.xcuserdatad
+*.xcscmblueprint
+*.orig
+*.DS_Store
+*.swp
+*.lock
+*.log
+
+# Firebase/Secrets (You should set this up carefully)
+.env
+*.xcconfig
+GoogleService-Info.plist
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Other
+*.moved-aside
+*.hmap
+*.ipa
+*.xcuserdata
+
