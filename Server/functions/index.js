@@ -380,7 +380,7 @@ async function analyzeChatsAndSuggestOutings() {
             },
             {
               role: "user",
-              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}\n\nBased on this, suggest 3 outing options. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date, Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
+              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}\n\nBased on this, suggest 5 outing options. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date, Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
             }
           ],
           temperature: 0.8
@@ -492,6 +492,7 @@ async function analyzeResponsesAndSendFinalPlan() {
     let allMessages = [];
     let unavailableUserIds = [];
     let availableUserNames = [];
+    let originalSuggestions = [];
     
     // First pass to identify which users are unavailable and collect names of available users
     for (const chatDoc of chatsSnapshot.docs) {
@@ -513,40 +514,55 @@ async function analyzeResponsesAndSendFinalPlan() {
       } else {
         availableUserNames.push(user.fullname);
         allMessages = allMessages.concat(messages);
+        
+        // Collect original suggestions from event cards
+        messages.forEach(msg => {
+          if (msg.eventCard && !originalSuggestions.some(s => s.activity === msg.eventCard.activity)) {
+            originalSuggestions.push(msg.eventCard);
+          }
+        });
       }
     }
 
+    // If no suggestions were found, skip this chatbot
+    if (originalSuggestions.length === 0) {
+      console.log('No original suggestions found, skipping final plan generation');
+      continue;
+    }
+
     const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
+    
+    // Format suggestions with their index numbers for reference
+    const formattedSuggestions = originalSuggestions.map((s, index) => 
+      `Option ${index + 1}:\nActivity: ${s.activity}\nLocation: ${s.location}\nDate: ${s.date}\nTime: ${s.startTime}-${s.endTime}\nDescription: ${s.description}`
+    ).join('\n\n');
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: "You analyze group chats to finalize and announce the weekend plan. Be specific about activity, location, date, and times."
+          content: "You analyze group chat conversations to select the most popular weekend plan from the original suggestions. You must choose exactly one of the numbered options provided. Look for explicit preferences (e.g., 'I like option 1' or 'the first one sounds good') and implicit preferences in the conversation."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nBased on this, create ONE final plan that includes: 
-          1. A specific activity
-          2. A specific location with address
-          3. A specific date (next weekend)
-          4. Specific start and end times
-          5. A brief description of what to expect
-          6. List of who is attending
-          
-          Format this clearly with labeled sections.`
+          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nOriginal suggestions (numbered for reference):\n${formattedSuggestions}\n\nBased on the conversation, which option (1-${originalSuggestions.length}) is most preferred by the group? Return ONLY the number of your selection (e.g., '1' or '2').`
         }
       ],
-      temperature: 0.7
+      temperature: 0.3
     });
 
-    const finalPlanText = completion.choices[0].message.content.trim();
+    const selectedIndex = parseInt(completion.choices[0].message.content.trim()) - 1;
     
-    // Parse the final plan and create an event card
-    const finalEventData = await parseEventDetails(finalPlanText);
-    finalEventData.attendees = availableUserNames;
-    const finalEventCard = await createEventCard(finalEventData);
+    // Validate the selection
+    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= originalSuggestions.length) {
+      console.error('Invalid selection from AI, defaulting to first suggestion');
+      selectedIndex = 0;
+    }
+
+    // Use the selected suggestion as the final plan
+    const finalEventCard = originalSuggestions[selectedIndex];
+    finalEventCard.attendees = availableUserNames;
 
     // Only send to users who are available
     for (const chatDoc of chatsSnapshot.docs) {
@@ -564,7 +580,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       // Send an intro message
       const introMessage = {
         id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Hey ${user.fullname.split(' ')[0]}! Here's the final plan for our weekend hangout:`,
+        text: `Hey ${user.fullname.split(' ')[0]}! Based on everyone's preferences, here's the plan we're going with:`,
         senderId: chatbot.id,
         timestamp: admin.firestore.Timestamp.now(),
         side: 'bot'
@@ -583,7 +599,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       
       // Update the chat's last message
       await chatDoc.ref.update({
-        lastMessage: `Final plan: ${finalEventData.activity}`,
+        lastMessage: `Final plan: ${finalEventCard.activity}`,
         updatedAt: admin.firestore.Timestamp.now()
       });
     }
@@ -594,7 +610,7 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('57 19 * * 1')
+  .schedule('11 21 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
@@ -606,7 +622,7 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('00 20 * * 1')
+  .schedule('14 21 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
@@ -618,7 +634,7 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('02 20 * * 1')
+  .schedule('17 21 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
