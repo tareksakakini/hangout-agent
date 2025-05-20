@@ -17,19 +17,37 @@ struct ChatView: View {
             ScrollViewReader { scrollViewProxy in
                 ScrollView {
                     if let chat {
-                        ForEach(chat.messages, id: \.id) { message in
-                            if let eventCard = message.eventCard {
-                                EventCardView(eventCard: eventCard)
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 4)
+                        VStack(spacing: 12) {
+                            ForEach(0..<chat.messages.count, id: \.self) { index in
+                                let message = chat.messages[index]
+                                if let eventCard = message.eventCard {
+                                    // Check if this is the start of a new group of event cards
+                                    let isStartOfGroup = index == 0 || chat.messages[index - 1].eventCard == nil
+                                    
+                                    if isStartOfGroup {
+                                        // Find all consecutive event cards
+                                        let eventCards = chat.messages[index...].prefix { $0.eventCard != nil }.compactMap { $0.eventCard }
+                                        
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 12) {
+                                                ForEach(eventCards, id: \.id) { eventCard in
+                                                    EventCardView(eventCard: eventCard)
+                                                        .frame(width: UIScreen.main.bounds.width * 0.8)
+                                                }
+                                            }
+                                            .padding(.horizontal, 4)
+                                        }
+                                        .id("eventCards-\(index)")
+                                    }
+                                } else {
+                                    // Display text message
+                                    MessageView(
+                                        text: message.text,
+                                        alignment: message.side == "user" ? .trailing : .leading,
+                                        timestamp: message.timestamp
+                                    )
                                     .id(message.id)
-                            } else {
-                                MessageView(
-                                    text: message.text,
-                                    alignment: message.side == "user" ? .trailing : .leading,
-                                    timestamp: message.timestamp
-                                )
-                                .id(message.id)
+                                }
                             }
                         }
                     }
@@ -873,18 +891,18 @@ struct EventCardView: View {
                 switch phase {
                 case .empty:
                     ProgressView()
-                        .frame(height: 160)
+                        .frame(height: 120)
                 case .success(let image):
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(height: 160)
+                        .frame(height: 120)
                         .clipped()
                 case .failure:
                     Image(systemName: "photo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 160)
+                        .frame(height: 120)
                         .padding()
                         .background(Color.gray.opacity(0.3))
                 @unknown default:
@@ -894,19 +912,21 @@ struct EventCardView: View {
             .frame(maxWidth: .infinity)
             
             // Content section
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 // Activity title
                 Text(eventCard.activity)
                     .font(.headline)
                     .foregroundColor(.primary)
+                    .lineLimit(1)
                 
                 // Location
                 HStack(spacing: 4) {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundColor(.red)
                     Text(eventCard.location)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
                 
                 // Date and time
@@ -914,7 +934,7 @@ struct EventCardView: View {
                     Image(systemName: "calendar")
                         .foregroundColor(.blue)
                     Text("\(formatDate(eventCard.date))")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
@@ -922,28 +942,30 @@ struct EventCardView: View {
                     Image(systemName: "clock.fill")
                         .foregroundColor(.green)
                     Text("\(eventCard.startTime) - \(eventCard.endTime)")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 // Description
                 Text(eventCard.description)
-                    .font(.body)
+                    .font(.caption)
                     .foregroundColor(.primary)
-                    .padding(.top, 6)
+                    .lineLimit(2)
+                    .padding(.top, 4)
                 
                 // Attendees if available
                 if let attendees = eventCard.attendees, !attendees.isEmpty {
                     Divider()
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 4)
                     
                     Text("Attendees:")
-                        .font(.subheadline)
+                        .font(.caption)
                         .fontWeight(.medium)
                     
                     Text(attendees.joined(separator: ", "))
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
                 
                 // Add to calendar button
@@ -955,18 +977,18 @@ struct EventCardView: View {
                         Text("Add to Calendar")
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 6)
                     .background(Color.blue)
                     .foregroundColor(.white)
-                    .cornerRadius(8)
+                    .cornerRadius(6)
                 }
-                .padding(.top, 12)
+                .padding(.top, 8)
             }
-            .padding()
+            .padding(12)
         }
         .background(Color.white)
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
     }
     
     private func formatDate(_ dateString: String) -> String {
