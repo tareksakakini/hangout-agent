@@ -99,6 +99,33 @@ async function sendMessagesToSubscribers() {
   }
 }
 
+async function checkUserAvailability(messages) {
+  try {
+    const formattedMessages = messages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You analyze conversations and determine if a user has indicated they are not available for the weekend plans. Return ONLY 'available' or 'not available' based on your analysis."
+        },
+        {
+          role: "user",
+          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for the weekend hangout?`
+        }
+      ],
+      temperature: 0.1
+    });
+
+    const response = completion.choices[0].message.content.trim().toLowerCase();
+    return response.includes('not available');
+  } catch (error) {
+    console.error('Error checking user availability:', error);
+    return false; // Default to assuming they're available if there's an error
+  }
+}
+
 async function analyzeChatsAndSuggestOutings() {
   const db = admin.firestore();
   const chatbotsSnapshot = await db.collection('chatbots').get();
@@ -110,13 +137,25 @@ async function analyzeChatsAndSuggestOutings() {
       .get();
 
     let allMessages = [];
+    let unavailableUserIds = [];
+    
+    // First pass to identify which users are unavailable
     for (const chatDoc of chatsSnapshot.docs) {
+      const userId = chatDoc.data().userId;
       const messagesSnapshot = await chatDoc.ref.collection('messages')
         .orderBy('timestamp', 'asc')
         .get();
 
       const messages = messagesSnapshot.docs.map(doc => doc.data());
-      allMessages = allMessages.concat(messages);
+      
+      // Check if user is available based on their messages
+      const isUnavailable = await checkUserAvailability(messages);
+      if (isUnavailable) {
+        unavailableUserIds.push(userId);
+        console.log(`User ${userId} indicated they are not available`);
+      } else {
+        allMessages = allMessages.concat(messages);
+      }
     }
 
     const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
@@ -126,11 +165,11 @@ async function analyzeChatsAndSuggestOutings() {
       messages: [
         {
           role: "system",
-          content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options."
+          content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. Keep it short without compromising important details."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this, suggest 3-5 outing options including activity, location, and timing.`
+          content: `Conversation history:\n${formattedMessages}\n\nBased on this, suggest 3-5 outing options including activity, location, and timing. Format your suggestions as a numbered list, where each item includes activity, location (exact address), date, start time, and end time.`
         }
       ],
       temperature: 0.8
@@ -138,8 +177,16 @@ async function analyzeChatsAndSuggestOutings() {
 
     const suggestions = completion.choices[0].message.content.trim();
 
+    // Only send to users who are available
     for (const chatDoc of chatsSnapshot.docs) {
       const userId = chatDoc.data().userId;
+      
+      // Skip users who indicated they are not available
+      if (unavailableUserIds.includes(userId)) {
+        console.log(`Skipping suggestions for unavailable user ${userId}`);
+        continue;
+      }
+      
       const userDoc = await db.collection('users').doc(userId).get();
       const user = userDoc.data();
 
@@ -171,13 +218,30 @@ async function analyzeResponsesAndSendFinalPlan() {
       .get();
 
     let allMessages = [];
+    let unavailableUserIds = [];
+    let availableUserNames = [];
+    
+    // First pass to identify which users are unavailable and collect names of available users
     for (const chatDoc of chatsSnapshot.docs) {
+      const userId = chatDoc.data().userId;
       const messagesSnapshot = await chatDoc.ref.collection('messages')
         .orderBy('timestamp', 'asc')
         .get();
 
       const messages = messagesSnapshot.docs.map(doc => doc.data());
-      allMessages = allMessages.concat(messages);
+      
+      // Check if user is available based on their messages
+      const isUnavailable = await checkUserAvailability(messages);
+      
+      const userDoc = await db.collection('users').doc(userId).get();
+      const user = userDoc.data();
+      
+      if (isUnavailable) {
+        unavailableUserIds.push(userId);
+      } else {
+        availableUserNames.push(user.fullname);
+        allMessages = allMessages.concat(messages);
+      }
     }
 
     const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
@@ -191,7 +255,7 @@ async function analyzeResponsesAndSendFinalPlan() {
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this, summarize the final plan including the most agreed upon activity, location, and who is attending.`
+          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nBased on this, summarize the final plan including the most agreed upon activity, location, and who is attending.`
         }
       ],
       temperature: 0.7
@@ -199,8 +263,16 @@ async function analyzeResponsesAndSendFinalPlan() {
 
     const finalPlan = completion.choices[0].message.content.trim();
 
+    // Only send to users who are available
     for (const chatDoc of chatsSnapshot.docs) {
       const userId = chatDoc.data().userId;
+      
+      // Skip users who indicated they are not available
+      if (unavailableUserIds.includes(userId)) {
+        console.log(`Skipping final plan for unavailable user ${userId}`);
+        continue;
+      }
+      
       const userDoc = await db.collection('users').doc(userId).get();
       const user = userDoc.data();
 
@@ -225,7 +297,7 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('15 17 * * 1')
+  .schedule('05 18 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
@@ -233,7 +305,7 @@ exports.suggestWeekendOutings = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('18 17 * * 1')
+  .schedule('08 18 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
@@ -241,7 +313,7 @@ exports.sendFinalPlan = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('20 17 * * 1')
+  .schedule('10 18 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
