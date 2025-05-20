@@ -18,16 +18,23 @@ struct ChatView: View {
                 ScrollView {
                     if let chat {
                         ForEach(chat.messages, id: \.id) { message in
-                            MessageView(
-                                text: message.text,
-                                alignment: message.side == "user" ? .trailing : .leading,
-                                timestamp: message.timestamp
-                            )
-                            .id(message.id)
+                            if let eventCard = message.eventCard {
+                                EventCardView(eventCard: eventCard)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 4)
+                                    .id(message.id)
+                            } else {
+                                MessageView(
+                                    text: message.text,
+                                    alignment: message.side == "user" ? .trailing : .leading,
+                                    timestamp: message.timestamp
+                                )
+                                .id(message.id)
+                            }
                         }
                     }
                 }
-                .onChange(of: chat?.messages.count) { _ in
+                .onChange(of: chat?.messages.count) { newCount in
                     scrollToBottom(using: scrollViewProxy)
                 }
                 .onAppear {
@@ -45,6 +52,28 @@ struct ChatView: View {
             if let chat = chat {
                 vm.stopListeningToMessages(chatId: chat.id)
             }
+        }
+        .onAppear {
+            logChatState()
+        }
+        .onChange(of: chat?.messages) { _ in
+            logChatState()
+        }
+    }
+    
+    private func logChatState() {
+        if let chat {
+            print("📱 Rendering chat with \(chat.messages.count) messages")
+            for message in chat.messages {
+                print("📱 Processing message: \(message.id)")
+                if let eventCard = message.eventCard {
+                    print("📋 Rendering event card for activity: \(eventCard.activity)")
+                } else {
+                    print("💬 Rendering text message: \(message.text)")
+                }
+            }
+        } else {
+            print("❌ No chat found for user: \(user.id) and chatbot: \(chatbot.id)")
         }
     }
     
@@ -831,5 +860,125 @@ struct StartingView: View {
                 }
             }
         }
+    }
+}
+
+struct EventCardView: View {
+    let eventCard: EventCard
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Image section
+            AsyncImage(url: URL(string: eventCard.imageUrl)) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(height: 160)
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(height: 160)
+                        .clipped()
+                case .failure:
+                    Image(systemName: "photo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 160)
+                        .padding()
+                        .background(Color.gray.opacity(0.3))
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Content section
+            VStack(alignment: .leading, spacing: 10) {
+                // Activity title
+                Text(eventCard.activity)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                // Location
+                HStack(spacing: 4) {
+                    Image(systemName: "mappin.circle.fill")
+                        .foregroundColor(.red)
+                    Text(eventCard.location)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Date and time
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .foregroundColor(.blue)
+                    Text("\(formatDate(eventCard.date))")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .foregroundColor(.green)
+                    Text("\(eventCard.startTime) - \(eventCard.endTime)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Description
+                Text(eventCard.description)
+                    .font(.body)
+                    .foregroundColor(.primary)
+                    .padding(.top, 6)
+                
+                // Attendees if available
+                if let attendees = eventCard.attendees, !attendees.isEmpty {
+                    Divider()
+                        .padding(.vertical, 8)
+                    
+                    Text("Attendees:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text(attendees.joined(separator: ", "))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Add to calendar button
+                Button(action: {
+                    // TODO: Implement add to calendar functionality
+                }) {
+                    HStack {
+                        Image(systemName: "calendar.badge.plus")
+                        Text("Add to Calendar")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .padding(.top, 12)
+            }
+            .padding()
+        }
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+    }
+    
+    private func formatDate(_ dateString: String) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        guard let date = dateFormatter.date(from: dateString) else {
+            return dateString
+        }
+        
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateFormat = "EEEE, MMM d, yyyy"
+        return displayFormatter.string(from: date)
     }
 }

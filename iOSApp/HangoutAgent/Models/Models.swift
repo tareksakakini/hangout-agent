@@ -39,6 +39,24 @@ struct Message: Identifiable, Codable, Equatable {
     var senderId: String
     var timestamp: Date
     var side: String
+    var eventCard: EventCard?
+}
+
+struct EventCard: Identifiable, Codable, Equatable {
+    var type: String
+    var activity: String
+    var location: String
+    var date: String
+    var startTime: String
+    var endTime: String
+    var description: String
+    var imageUrl: String
+    var attendees: [String]?
+    
+    var id: String {
+        // Generate a unique ID based on activity and date
+        return "\(activity)-\(date)".replacingOccurrences(of: " ", with: "-")
+    }
 }
 
 struct Chatbot: Identifiable, Codable, Hashable {

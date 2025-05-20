@@ -200,13 +200,30 @@ class DatabaseManager {
     
     func sendMessageToChat(chatId: String, message: Message) async throws {
         let messageRef = db.collection("chats").document(chatId).collection("messages").document(message.id)
-        let messageData: [String: Any] = [
+        var messageData: [String: Any] = [
             "id": message.id,
             "text": message.text,
             "senderId": message.senderId,
             "timestamp": Timestamp(date: message.timestamp),
             "side": message.side
         ]
+        
+        // Add eventCard if present
+        if let eventCard = message.eventCard {
+            print("📋 Adding event card to message: \(eventCard.activity)")
+            messageData["eventCard"] = [
+                "type": eventCard.type,
+                "activity": eventCard.activity,
+                "location": eventCard.location,
+                "date": eventCard.date,
+                "startTime": eventCard.startTime,
+                "endTime": eventCard.endTime,
+                "description": eventCard.description,
+                "imageUrl": eventCard.imageUrl,
+                "attendees": eventCard.attendees
+            ]
+        }
+        
         try await messageRef.setData(messageData)
         
         // Update last message in parent chat
@@ -285,30 +302,73 @@ class DatabaseManager {
     }
     
     func listenToMessages(chatId: String, onUpdate: @escaping ([Message]) -> Void) -> ListenerRegistration {
+        print("📱 Starting to listen to messages for chat: \(chatId)")
         return db.collection("chats")
             .document(chatId)
             .collection("messages")
             .order(by: "timestamp", descending: false)
             .addSnapshotListener { snapshot, error in
-                guard let documents = snapshot?.documents else {
-                    print("Error fetching messages: \(error?.localizedDescription ?? "Unknown error")")
+                if let error = error {
+                    print("❌ Error fetching messages: \(error.localizedDescription)")
                     return
                 }
                 
+                guard let documents = snapshot?.documents else {
+                    print("❌ No documents in snapshot")
+                    return
+                }
+                
+                print("📥 Received \(documents.count) messages from Firestore")
+                
                 let messages = documents.compactMap { doc -> Message? in
                     let data = doc.data()
+                    print("📄 Processing message document: \(doc.documentID)")
+                    print("📄 Message data: \(data)")
+                    
                     guard
                         let id = data["id"] as? String,
-                        let text = data["text"] as? String,
                         let senderId = data["senderId"] as? String,
                         let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
                         let side = data["side"] as? String
                     else {
+                        print("❌ Failed to decode basic message fields")
                         return nil
                     }
-                    return Message(id: id, text: text, senderId: senderId, timestamp: timestamp, side: side)
+                    
+                    // Get text field, defaulting to empty string if not present
+                    let text = data["text"] as? String ?? ""
+                    
+                    // Try to decode eventCard if present
+                    var eventCard: EventCard? = nil
+                    if let eventCardData = data["eventCard"] as? [String: Any] {
+                        print("📄 Found eventCard data: \(eventCardData)")
+                        do {
+                            let jsonData = try JSONSerialization.data(withJSONObject: eventCardData)
+                            eventCard = try JSONDecoder().decode(EventCard.self, from: jsonData)
+                            print("✅ Successfully decoded eventCard")
+                        } catch {
+                            print("❌ Failed to decode eventCard: \(error)")
+                        }
+                    }
+                    
+                    let message = Message(
+                        id: id,
+                        text: text,
+                        senderId: senderId,
+                        timestamp: timestamp,
+                        side: side,
+                        eventCard: eventCard
+                    )
+                    
+                    print("✅ Successfully created message with id: \(id)")
+                    if eventCard != nil {
+                        print("📋 Message contains eventCard for activity: \(eventCard?.activity ?? "unknown")")
+                    }
+                    
+                    return message
                 }
                 
+                print("📤 Sending \(messages.count) messages to UI")
                 onUpdate(messages)
             }
     }

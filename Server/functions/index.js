@@ -10,6 +10,55 @@ const openai = new OpenAI({
   apiKey: functions.config().openai.key,
 });
 
+// Add a collection of fallback image URLs by activity type
+const FALLBACK_IMAGES = {
+  default: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/default_event.jpg?alt=media",
+  dining: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/dining.jpg?alt=media",
+  hiking: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/hiking.jpg?alt=media", 
+  movie: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/movie.jpg?alt=media",
+  concert: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/concert.jpg?alt=media",
+  beach: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/beach.jpg?alt=media",
+  park: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/park.jpg?alt=media",
+  coffee: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/coffee.jpg?alt=media",
+  sports: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/sports.jpg?alt=media",
+  bowling: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/bowling.jpg?alt=media"
+};
+
+function getFallbackImageForActivity(activity) {
+  const activityLower = activity.toLowerCase();
+  
+  // Check for relevant keywords in the activity
+  if (activityLower.includes('dinner') || activityLower.includes('lunch') || 
+      activityLower.includes('brunch') || activityLower.includes('restaurant')) {
+    return FALLBACK_IMAGES.dining;
+  } else if (activityLower.includes('hike') || activityLower.includes('hiking') || 
+             activityLower.includes('trail')) {
+    return FALLBACK_IMAGES.hiking;
+  } else if (activityLower.includes('movie') || activityLower.includes('cinema') || 
+             activityLower.includes('film')) {
+    return FALLBACK_IMAGES.movie;
+  } else if (activityLower.includes('concert') || activityLower.includes('music') || 
+             activityLower.includes('show')) {
+    return FALLBACK_IMAGES.concert;
+  } else if (activityLower.includes('beach') || activityLower.includes('ocean') || 
+             activityLower.includes('coast')) {
+    return FALLBACK_IMAGES.beach;
+  } else if (activityLower.includes('park') || activityLower.includes('garden') || 
+             activityLower.includes('picnic')) {
+    return FALLBACK_IMAGES.park;
+  } else if (activityLower.includes('coffee') || activityLower.includes('cafe') || 
+             activityLower.includes('tea')) {
+    return FALLBACK_IMAGES.coffee;
+  } else if (activityLower.includes('sport') || activityLower.includes('game') || 
+             activityLower.includes('play')) {
+    return FALLBACK_IMAGES.sports;
+  } else if (activityLower.includes('bowl') || activityLower.includes('bowling')) {
+    return FALLBACK_IMAGES.bowling;
+  }
+  
+  return FALLBACK_IMAGES.default;
+}
+
 async function sendMessagesToSubscribers() {
   console.log('Function started at:', new Date().toISOString());
   const db = admin.firestore();
@@ -126,84 +175,307 @@ async function checkUserAvailability(messages) {
   }
 }
 
-async function analyzeChatsAndSuggestOutings() {
-  const db = admin.firestore();
-  const chatbotsSnapshot = await db.collection('chatbots').get();
-
-  for (const chatbotDoc of chatbotsSnapshot.docs) {
-    const chatbot = chatbotDoc.data();
-    const chatsSnapshot = await db.collection('chats')
-      .where('chatbotId', '==', chatbot.id)
-      .get();
-
-    let allMessages = [];
-    let unavailableUserIds = [];
+async function getImageForActivity(activity) {
+  try {
+    console.log(`Generating image for activity: ${activity}`);
     
-    // First pass to identify which users are unavailable
-    for (const chatDoc of chatsSnapshot.docs) {
-      const userId = chatDoc.data().userId;
-      const messagesSnapshot = await chatDoc.ref.collection('messages')
-        .orderBy('timestamp', 'asc')
-        .get();
+    // Set a timeout for the image generation (20 seconds)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Image generation timed out')), 20000)
+    );
+    
+    const imagePromise = openai.images.generate({
+      model: "dall-e-3",
+      prompt: `Create a vibrant, appealing image representing a group of friends enjoying this activity: ${activity}. Show people having fun in a clean, well-lit environment. No text overlay. Lifestyle photography style.`,
+      n: 1,
+      size: "1024x1024",
+    });
+    
+    // Race the image generation against the timeout
+    const completion = await Promise.race([imagePromise, timeoutPromise]);
+    
+    console.log('Successfully generated image');
+    return completion.data[0].url;
+  } catch (error) {
+    console.error('Error generating image:', error);
+    console.error('Error details:', JSON.stringify(error));
+    console.log('Using fallback image for activity');
+    return getFallbackImageForActivity(activity);
+  }
+}
 
-      const messages = messagesSnapshot.docs.map(doc => doc.data());
-      
-      // Check if user is available based on their messages
-      const isUnavailable = await checkUserAvailability(messages);
-      if (isUnavailable) {
-        unavailableUserIds.push(userId);
-        console.log(`User ${userId} indicated they are not available`);
-      } else {
-        allMessages = allMessages.concat(messages);
-      }
-    }
-
-    const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
-
+async function parseEventDetails(text) {
+  try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. Keep it short without compromising important details."
+          content: "Extract the structured details from the event description. Your response must ONLY contain a valid JSON object with no additional text or markdown formatting."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this, suggest 3-5 outing options including activity, location, and timing. Format your suggestions as a numbered list, where each item includes activity, location (exact address), date, start time, and end time.`
+          content: `Extract the following details from this event description as a JSON object with these keys: 
+          "activity" (the main activity), 
+          "location" (the specific location/address), 
+          "date" (format: YYYY-MM-DD), 
+          "startTime" (format: HH:MM), 
+          "endTime" (format: HH:MM), 
+          "description" (a brief 1-2 sentence description).
+          
+          Here's the event text:
+          ${text}
+          
+          Return ONLY the JSON object with no additional explanation or markdown formatting.`
         }
       ],
-      temperature: 0.8
+      temperature: 0.1
     });
 
-    const suggestions = completion.choices[0].message.content.trim();
+    const content = completion.choices[0].message.content.trim();
+    // Extract JSON even if there's unexpected text around it
+    const jsonMatch = content.match(/(\{.*\})/s);
+    if (jsonMatch && jsonMatch[0]) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    
+    // Fallback if we can't extract JSON
+    return {
+      activity: text.substring(0, 50),
+      location: "See description for details",
+      date: "TBD",
+      startTime: "TBD",
+      endTime: "TBD",
+      description: text
+    };
+  } catch (error) {
+    console.error('Error parsing event details:', error);
+    // Return a default format if parsing fails
+    return {
+      activity: text.substring(0, 50),
+      location: "See description for details",
+      date: "TBD",
+      startTime: "TBD",
+      endTime: "TBD",
+      description: text
+    };
+  }
+}
 
-    // Only send to users who are available
-    for (const chatDoc of chatsSnapshot.docs) {
-      const userId = chatDoc.data().userId;
+async function createEventCard(eventData) {
+  try {
+    console.log(`Creating event card for activity: ${eventData.activity}`);
+    const imageUrl = await getImageForActivity(eventData.activity);
+    
+    return {
+      type: "eventCard",
+      activity: eventData.activity,
+      location: eventData.location,
+      date: eventData.date,
+      startTime: eventData.startTime,
+      endTime: eventData.endTime,
+      description: eventData.description,
+      imageUrl: imageUrl || getFallbackImageForActivity(eventData.activity),
+    };
+  } catch (error) {
+    console.error('Error creating event card:', error);
+    // Return a card with fallback image if there's an error
+    return {
+      type: "eventCard",
+      activity: eventData.activity,
+      location: eventData.location,
+      date: eventData.date,
+      startTime: eventData.startTime,
+      endTime: eventData.endTime,
+      description: eventData.description,
+      imageUrl: getFallbackImageForActivity(eventData.activity),
+    };
+  }
+}
+
+async function analyzeChatsAndSuggestOutings() {
+  console.log('Starting analyzeChatsAndSuggestOutings function');
+  const db = admin.firestore();
+  
+  try {
+    console.log('Fetching chatbots');
+    const chatbotsSnapshot = await db.collection('chatbots').get();
+    console.log(`Found ${chatbotsSnapshot.size} chatbots`);
+
+    for (const chatbotDoc of chatbotsSnapshot.docs) {
+      const chatbot = chatbotDoc.data();
+      console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
       
-      // Skip users who indicated they are not available
-      if (unavailableUserIds.includes(userId)) {
-        console.log(`Skipping suggestions for unavailable user ${userId}`);
+      console.log(`Fetching chats for chatbot: ${chatbot.id}`);
+      const chatsSnapshot = await db.collection('chats')
+        .where('chatbotId', '==', chatbot.id)
+        .get();
+      console.log(`Found ${chatsSnapshot.size} chats for chatbot: ${chatbot.id}`);
+
+      let allMessages = [];
+      let unavailableUserIds = [];
+      
+      // First pass to identify which users are unavailable
+      console.log('Starting to process individual chats and check user availability');
+      for (const chatDoc of chatsSnapshot.docs) {
+        const userId = chatDoc.data().userId;
+        console.log(`Processing chat with userId: ${userId}`);
+        
+        console.log(`Fetching messages for chat: ${chatDoc.id}`);
+        const messagesSnapshot = await chatDoc.ref.collection('messages')
+          .orderBy('timestamp', 'asc')
+          .get();
+        console.log(`Found ${messagesSnapshot.size} messages for chat: ${chatDoc.id}`);
+
+        const messages = messagesSnapshot.docs.map(doc => doc.data());
+        
+        // Check if user is available based on their messages
+        console.log(`Checking availability for user: ${userId}`);
+        try {
+          const isUnavailable = await checkUserAvailability(messages);
+          if (isUnavailable) {
+            unavailableUserIds.push(userId);
+            console.log(`User ${userId} indicated they are not available`);
+          } else {
+            console.log(`User ${userId} appears to be available, adding their messages`);
+            allMessages = allMessages.concat(messages);
+          }
+        } catch (error) {
+          console.error(`Error checking availability for user ${userId}:`, error);
+          // Default to keeping the user's messages
+          allMessages = allMessages.concat(messages);
+        }
+      }
+
+      console.log(`Total message count for analysis: ${allMessages.length}`);
+      console.log(`Unavailable users: ${unavailableUserIds.length}`);
+      
+      if (allMessages.length === 0) {
+        console.log('No messages to analyze, skipping suggestion generation');
         continue;
       }
       
-      const userDoc = await db.collection('users').doc(userId).get();
-      const user = userDoc.data();
+      const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
+      console.log('Formatted messages for OpenAI, length:', formattedMessages.length);
+      
+      if (formattedMessages.length > 30000) {
+        console.log('Warning: Conversation history is very long, truncating to avoid token limits');
+        const truncatedMessages = formattedMessages.substring(0, 30000);
+        console.log('Truncated message length:', truncatedMessages.length);
+      }
 
-      const message = {
-        id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas:\n\n${suggestions}`,
-        senderId: chatbot.id,
-        timestamp: admin.firestore.Timestamp.now(),
-        side: 'bot'
-      };
+      console.log('Calling OpenAI to generate suggestions');
+      try {
+        // Set a timeout for the OpenAI call (30 seconds)
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('OpenAI API call timed out')), 30000)
+        );
+        
+        const openAIPromise = openai.chat.completions.create({
+          model: "gpt-4",
+          messages: [
+            {
+              role: "system",
+              content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. For each suggestion, include activity, specific location with address, date (next weekend), specific start and end times."
+            },
+            {
+              role: "user",
+              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}\n\nBased on this, suggest 3 outing options. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date, Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
+            }
+          ],
+          temperature: 0.8
+        });
+        
+        // Race the OpenAI call against the timeout
+        const completion = await Promise.race([openAIPromise, timeoutPromise]);
 
-      await db.collection('chats').doc(chatDoc.id).collection('messages').add(message);
-      await chatDoc.ref.update({
-        lastMessage: message.text,
-        updatedAt: admin.firestore.Timestamp.now()
-      });
+        console.log('Successfully received suggestions from OpenAI');
+        const suggestionsText = completion.choices[0].message.content.trim();
+        console.log('Suggestions text length:', suggestionsText.length);
+        const suggestionParagraphs = suggestionsText.split(/\n\n+/);
+        console.log(`Split into ${suggestionParagraphs.length} suggestion paragraphs`);
+        
+        // Parse each suggestion and create event cards
+        const eventCards = [];
+        for (let i = 0; i < suggestionParagraphs.length; i++) {
+          const paragraph = suggestionParagraphs[i];
+          if (paragraph.trim().length > 0) {
+            console.log(`Processing suggestion paragraph ${i+1}, length: ${paragraph.length}`);
+            try {
+              console.log('Parsing event details');
+              const eventData = await parseEventDetails(paragraph);
+              console.log('Getting image for activity:', eventData.activity);
+              const eventCard = await createEventCard(eventData);
+              eventCards.push(eventCard);
+              console.log(`Successfully created card for: ${eventData.activity}`);
+            } catch (error) {
+              console.error(`Error processing suggestion ${i+1}:`, error);
+            }
+          }
+        }
+        console.log(`Created ${eventCards.length} event cards`);
+
+        // Only send to users who are available
+        console.log('Sending suggestions to available users');
+        for (const chatDoc of chatsSnapshot.docs) {
+          const userId = chatDoc.data().userId;
+          
+          // Skip users who indicated they are not available
+          if (unavailableUserIds.includes(userId)) {
+            console.log(`Skipping suggestions for unavailable user ${userId}`);
+            continue;
+          }
+          
+          try {
+            console.log(`Fetching user data for ${userId}`);
+            const userDoc = await db.collection('users').doc(userId).get();
+            const user = userDoc.data();
+            
+            // Create an intro message
+            console.log(`Sending intro message to ${user.fullname}`);
+            const introMessage = {
+              id: admin.firestore.Timestamp.now().toMillis().toString(),
+              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for the weekend:`,
+              senderId: chatbot.id,
+              timestamp: admin.firestore.Timestamp.now(),
+              side: 'bot'
+            };
+            await db.collection('chats').doc(chatDoc.id).collection('messages').add(introMessage);
+            
+            // Add each event card as a separate message
+            console.log(`Sending ${eventCards.length} event cards to ${user.fullname}`);
+            for (const eventCard of eventCards) {
+              const cardMessage = {
+                id: admin.firestore.Timestamp.now().toMillis().toString(),
+                eventCard: eventCard,
+                senderId: chatbot.id,
+                timestamp: admin.firestore.Timestamp.now(),
+                side: 'bot'
+              };
+              await db.collection('chats').doc(chatDoc.id).collection('messages').add(cardMessage);
+            }
+            
+            // Update the chat's last message
+            console.log(`Updating last message for chat ${chatDoc.id}`);
+            await chatDoc.ref.update({
+              lastMessage: `${eventCards.length} weekend suggestions`,
+              updatedAt: admin.firestore.Timestamp.now()
+            });
+            console.log(`Successfully sent suggestions to ${user.fullname}`);
+          } catch (error) {
+            console.error(`Error sending suggestions to user ${userId}:`, error);
+          }
+        }
+      } catch (error) {
+        console.error('Error generating suggestions with OpenAI:', error);
+        console.error('Error details:', JSON.stringify(error));
+      }
     }
+    console.log('analyzeChatsAndSuggestOutings completed successfully');
+  } catch (error) {
+    console.error('Error in analyzeChatsAndSuggestOutings:', error);
+    console.error('Error stack:', error.stack);
+    throw error;
   }
 }
 
@@ -251,17 +523,30 @@ async function analyzeResponsesAndSendFinalPlan() {
       messages: [
         {
           role: "system",
-          content: "You analyze group chats to finalize and announce the weekend plan."
+          content: "You analyze group chats to finalize and announce the weekend plan. Be specific about activity, location, date, and times."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nBased on this, summarize the final plan including the most agreed upon activity, location, and who is attending.`
+          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nBased on this, create ONE final plan that includes: 
+          1. A specific activity
+          2. A specific location with address
+          3. A specific date (next weekend)
+          4. Specific start and end times
+          5. A brief description of what to expect
+          6. List of who is attending
+          
+          Format this clearly with labeled sections.`
         }
       ],
       temperature: 0.7
     });
 
-    const finalPlan = completion.choices[0].message.content.trim();
+    const finalPlanText = completion.choices[0].message.content.trim();
+    
+    // Parse the final plan and create an event card
+    const finalEventData = await parseEventDetails(finalPlanText);
+    finalEventData.attendees = availableUserNames;
+    const finalEventCard = await createEventCard(finalEventData);
 
     // Only send to users who are available
     for (const chatDoc of chatsSnapshot.docs) {
@@ -276,17 +561,29 @@ async function analyzeResponsesAndSendFinalPlan() {
       const userDoc = await db.collection('users').doc(userId).get();
       const user = userDoc.data();
 
-      const message = {
+      // Send an intro message
+      const introMessage = {
         id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Hey ${user.fullname.split(' ')[0]}! Here's the final plan for our weekend hangout:\n\n${finalPlan}`,
+        text: `Hey ${user.fullname.split(' ')[0]}! Here's the final plan for our weekend hangout:`,
         senderId: chatbot.id,
         timestamp: admin.firestore.Timestamp.now(),
         side: 'bot'
       };
-
-      await db.collection('chats').doc(chatDoc.id).collection('messages').add(message);
+      await db.collection('chats').doc(chatDoc.id).collection('messages').add(introMessage);
+      
+      // Send the event card
+      const cardMessage = {
+        id: admin.firestore.Timestamp.now().toMillis().toString(),
+        eventCard: finalEventCard,
+        senderId: chatbot.id,
+        timestamp: admin.firestore.Timestamp.now(),
+        side: 'bot'
+      };
+      await db.collection('chats').doc(chatDoc.id).collection('messages').add(cardMessage);
+      
+      // Update the chat's last message
       await chatDoc.ref.update({
-        lastMessage: message.text,
+        lastMessage: `Final plan: ${finalEventData.activity}`,
         updatedAt: admin.firestore.Timestamp.now()
       });
     }
@@ -297,23 +594,31 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('05 18 * * 1')
+  .schedule('57 19 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
 exports.suggestWeekendOutings = functions
   .region('us-central1')
-  .runWith({ platform: 'gcfv2' })
+  .runWith({
+    platform: 'gcfv2',
+    timeoutSeconds: 540, // 9 minutes (maximum timeout)
+    memory: '1GB' // Increase memory allocation
+  })
   .pubsub
-  .schedule('08 18 * * 1')
+  .schedule('00 20 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
 exports.sendFinalPlan = functions
   .region('us-central1')
-  .runWith({ platform: 'gcfv2' })
+  .runWith({
+    platform: 'gcfv2',
+    timeoutSeconds: 540, // 9 minutes (maximum timeout)
+    memory: '1GB' // Increase memory allocation
+  })
   .pubsub
-  .schedule('10 18 * * 1')
+  .schedule('02 20 * * 1')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 

@@ -131,10 +131,17 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func sendMessage(chat: Chat, text: String, senderId: String, side: String) async {
+    func sendMessage(chat: Chat, text: String, senderId: String, side: String, eventCard: EventCard? = nil) async {
         do {
             let firestoreService = DatabaseManager()
-            let message = Message(id: UUID().uuidString, text: text, senderId: senderId, timestamp: Date(), side: side)
+            let message = Message(
+                id: UUID().uuidString,
+                text: text,
+                senderId: senderId,
+                timestamp: Date(),
+                side: side,
+                eventCard: eventCard
+            )
             try await firestoreService.sendMessageToChat(chatId: chat.id, message: message)
         } catch {
             print("Error sending message: \(error)")
@@ -257,7 +264,15 @@ class ViewModel: ObservableObject {
                     continue
                 }
 
-                await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot")
+                // Check if this is an event card message
+                if let eventCardJson = call.arguments["eventCard"],
+                   let eventCardData = eventCardJson.data(using: .utf8),
+                   let eventCard = try? JSONDecoder().decode(EventCard.self, from: eventCardData) {
+                    print("📋 Sending message with event card: \(eventCard.activity)")
+                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot", eventCard: eventCard)
+                } else {
+                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot")
+                }
 
             default:
                 print("⚠️ Unknown function: \(call.function)")
@@ -298,14 +313,29 @@ class ViewModel: ObservableObject {
     }
 
     func startListeningToMessages(chatId: String) {
+        print("📱 Starting to listen to messages for chat: \(chatId)")
         // Remove existing listener if any
         stopListeningToMessages(chatId: chatId)
         
         let firestoreService = DatabaseManager()
         let listener = firestoreService.listenToMessages(chatId: chatId) { [weak self] messages in
+            print("📱 Received \(messages.count) messages update for chat: \(chatId)")
             DispatchQueue.main.async {
                 if let index = self?.chats.firstIndex(where: { $0.id == chatId }) {
+                    print("📱 Updating messages for chat at index: \(index)")
                     self?.chats[index].messages = messages
+                    print("📱 Updated messages count: \(messages.count)")
+                    
+                    // Log event cards if present
+                    let eventCards = messages.compactMap { $0.eventCard }
+                    if !eventCards.isEmpty {
+                        print("📋 Found \(eventCards.count) event cards in messages")
+                        for card in eventCards {
+                            print("📋 Event card for activity: \(card.activity)")
+                        }
+                    }
+                } else {
+                    print("❌ Could not find chat with id: \(chatId)")
                 }
             }
         }
@@ -313,6 +343,7 @@ class ViewModel: ObservableObject {
     }
 
     func stopListeningToMessages(chatId: String) {
+        print("📱 Stopping message listener for chat: \(chatId)")
         messageListeners[chatId]?.remove()
         messageListeners.removeValue(forKey: chatId)
     }
