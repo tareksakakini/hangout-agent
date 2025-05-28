@@ -14,14 +14,18 @@ class ViewModel: ObservableObject {
     @Published var users: [User] = []
     @Published var chatbots: [Chatbot] = []
     @Published var chats: [Chat] = []
+    @Published var groups: [Group] = []
+    @Published var groupMessages: [String: [GroupMessage]] = [:] // groupId -> messages
     
     private var messageListeners: [String: ListenerRegistration] = [:]
+    private var groupMessageListeners: [String: ListenerRegistration] = [:]
     
     init() {
         Task {
             await loadSignedInUser()
             self.users = await getAllUsers()
             self.chatbots = await getAllChatbots()
+            await loadGroupsForUser()
         }
     }
     
@@ -346,5 +350,237 @@ class ViewModel: ObservableObject {
         print("📱 Stopping message listener for chat: \(chatId)")
         messageListeners[chatId]?.remove()
         messageListeners.removeValue(forKey: chatId)
+    }
+    
+    // MARK: - Group Chat Methods
+    
+    func createGroup(name: String, participants: [String] = []) async -> Bool {
+        guard let user = signedInUser else { return false }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            let groupId = UUID().uuidString
+            
+            // Include the current user in participants if not already included
+            var allParticipants = participants
+            if !allParticipants.contains(user.id) {
+                allParticipants.append(user.id)
+            }
+            
+            // Get participant names
+            let participantNames = await getParticipantNames(for: allParticipants)
+            
+            let groupData: [String: Any] = [
+                "id": groupId,
+                "name": name,
+                "participants": allParticipants,
+                "participantNames": participantNames,
+                "createdAt": Timestamp(date: Date()),
+                "updatedAt": Timestamp(date: Date()),
+                "lastMessage": nil as String?
+            ]
+            
+            try await firestoreService.db.collection("groups")
+                .document(groupId)
+                .setData(groupData)
+            
+            // Reload groups to update the UI
+            await loadGroupsForUser()
+            
+            print("✅ Successfully created group: \(name) with ID: \(groupId)")
+            return true
+            
+        } catch {
+            print("❌ Error creating group: \(error)")
+            return false
+        }
+    }
+    
+    private func getParticipantNames(for participantIds: [String]) async -> [String] {
+        var names: [String] = []
+        
+        for participantId in participantIds {
+            if let user = users.first(where: { $0.id == participantId }) {
+                names.append(user.fullname)
+            } else if let user = await getUser(uid: participantId) {
+                names.append(user.fullname)
+            } else {
+                names.append("Unknown User")
+            }
+        }
+        
+        return names
+    }
+    
+    func loadGroupsForUser() async {
+        guard let user = signedInUser else { 
+            print("❌ No signed in user, cannot load groups")
+            return 
+        }
+        
+        print("📱 Loading groups for user: \(user.fullname) (ID: \(user.id))")
+        
+        do {
+            let firestoreService = DatabaseManager()
+            // Remove the .order(by:) to avoid composite index requirement
+            let groupsSnapshot = try await firestoreService.db.collection("groups")
+                .whereField("participants", arrayContains: user.id)
+                .getDocuments()
+            
+            print("📱 Found \(groupsSnapshot.documents.count) groups in Firestore")
+            
+            var loadedGroups: [Group] = []
+            
+            for groupDoc in groupsSnapshot.documents {
+                let data = groupDoc.data()
+                print("📱 Processing group document: \(groupDoc.documentID)")
+                print("📱 Group data: \(data)")
+                
+                let dateFormatter = DateFormatter()
+                let group = Group(
+                    id: data["id"] as? String ?? groupDoc.documentID,
+                    name: data["name"] as? String ?? "Unnamed Group",
+                    participants: data["participants"] as? [String] ?? [],
+                    participantNames: data["participantNames"] as? [String] ?? [],
+                    createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+                    eventDetails: nil, // We'll decode this separately if needed
+                    lastMessage: data["lastMessage"] as? String,
+                    updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+                )
+                
+                print("📱 Created group object: \(group.name) with \(group.participants.count) participants")
+                loadedGroups.append(group)
+            }
+            
+            // Sort locally by updatedAt in descending order
+            loadedGroups.sort { $0.updatedAt > $1.updatedAt }
+            
+            DispatchQueue.main.async {
+                self.groups = loadedGroups
+                print("📱 Updated UI with \(loadedGroups.count) groups")
+                
+                // Start listening to messages for each group
+                for group in loadedGroups {
+                    self.startListeningToGroupMessages(groupId: group.id)
+                }
+            }
+            
+        } catch {
+            print("❌ Error loading groups: \(error)")
+        }
+    }
+    
+    func sendGroupMessage(groupId: String, text: String) async {
+        guard let user = signedInUser else { return }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            let message = GroupMessage(
+                id: UUID().uuidString,
+                text: text,
+                senderId: user.id,
+                senderName: user.fullname,
+                timestamp: Date()
+            )
+            
+            // Convert to dictionary for Firestore
+            let messageData: [String: Any] = [
+                "id": message.id,
+                "text": message.text,
+                "senderId": message.senderId,
+                "senderName": message.senderName,
+                "timestamp": Timestamp(date: message.timestamp)
+            ]
+            
+            try await firestoreService.db.collection("groups")
+                .document(groupId)
+                .collection("messages")
+                .addDocument(data: messageData)
+            
+            // Update the group's last message and timestamp
+            try await firestoreService.db.collection("groups")
+                .document(groupId)
+                .updateData([
+                    "lastMessage": text,
+                    "updatedAt": Timestamp(date: Date())
+                ])
+            
+        } catch {
+            print("Error sending group message: \(error)")
+        }
+    }
+    
+    func startListeningToGroupMessages(groupId: String) {
+        print("📱 Starting to listen to group messages for group: \(groupId)")
+        // Remove existing listener if any
+        stopListeningToGroupMessages(groupId: groupId)
+        
+        let firestoreService = DatabaseManager()
+        let listener = firestoreService.db.collection("groups")
+            .document(groupId)
+            .collection("messages")
+            .order(by: "timestamp", descending: false)
+            .addSnapshotListener { [weak self] querySnapshot, error in
+                if let error = error {
+                    print("Error listening to group messages: \(error)")
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    print("No group messages found")
+                    return
+                }
+                
+                let messages = documents.compactMap { doc -> GroupMessage? in
+                    let data = doc.data()
+                    return GroupMessage(
+                        id: data["id"] as? String ?? doc.documentID,
+                        text: data["text"] as? String ?? "",
+                        senderId: data["senderId"] as? String ?? "",
+                        senderName: data["senderName"] as? String ?? "Unknown",
+                        timestamp: (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+                    )
+                }
+                
+                DispatchQueue.main.async {
+                    self?.groupMessages[groupId] = messages
+                    print("📱 Updated \(messages.count) group messages for group: \(groupId)")
+                }
+            }
+        
+        groupMessageListeners[groupId] = listener
+    }
+    
+    func stopListeningToGroupMessages(groupId: String) {
+        print("📱 Stopping group message listener for group: \(groupId)")
+        groupMessageListeners[groupId]?.remove()
+        groupMessageListeners.removeValue(forKey: groupId)
+    }
+    
+    func leaveGroup(groupId: String) async {
+        guard let user = signedInUser else { return }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            
+            // Remove user from group participants
+            try await firestoreService.db.collection("groups")
+                .document(groupId)
+                .updateData([
+                    "participants": FieldValue.arrayRemove([user.id]),
+                    "participantNames": FieldValue.arrayRemove([user.fullname])
+                ])
+            
+            // Stop listening to messages for this group
+            stopListeningToGroupMessages(groupId: groupId)
+            
+            // Remove group from local data
+            DispatchQueue.main.async {
+                self.groups.removeAll { $0.id == groupId }
+            }
+            
+        } catch {
+            print("Error leaving group: \(error)")
+        }
     }
 }

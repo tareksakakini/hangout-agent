@@ -20,7 +20,7 @@ struct ChatView: View {
                         VStack(spacing: 12) {
                             ForEach(0..<chat.messages.count, id: \.self) { index in
                                 let message = chat.messages[index]
-                                if let eventCard = message.eventCard {
+                                if message.eventCard != nil {
                                     // Check if this is the start of a new group of event cards
                                     let isStartOfGroup = index == 0 || chat.messages[index - 1].eventCard == nil
                                     
@@ -52,7 +52,7 @@ struct ChatView: View {
                         }
                     }
                 }
-                .onChange(of: chat?.messages.count) { newCount in
+                .onChange(of: chat?.messages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
                 }
                 .onAppear {
@@ -74,7 +74,7 @@ struct ChatView: View {
         .onAppear {
             logChatState()
         }
-        .onChange(of: chat?.messages) { _ in
+        .onChange(of: chat?.messages) { oldValue, newValue in
             logChatState()
         }
     }
@@ -420,14 +420,21 @@ struct HomeView: View {
                         }
                         .tag(0)
                     
+                    GroupListView()
+                        .tabItem {
+                            Image(systemName: "person.3")
+                            Text("Groups")
+                        }
+                        .tag(1)
+                    
                     ProfileView()
                         .tabItem {
                             Image(systemName: "person.circle")
                             Text("Profile")
                         }
-                        .tag(1)
+                        .tag(2)
                 }
-                .navigationTitle(selectedTab == 0 ? "Chats" : "Profile")
+                .navigationTitle(selectedTab == 0 ? "Chats" : selectedTab == 1 ? "Groups" : "Profile")
                 .toolbar {
                     if selectedTab == 0 {
                         ToolbarItem(placement: .navigationBarTrailing) {
@@ -524,7 +531,7 @@ extension LoginView {
     
     private var PasswordField: some View {
         HStack {
-            Group {
+            SwiftUI.Group {
                 if isPasswordVisible {
                     TextField("Password", text: $password)
                 } else {
@@ -761,7 +768,7 @@ extension SignupView {
     
     private var PasswordField: some View {
         HStack {
-            Group {
+            SwiftUI.Group {
                 if isPasswordVisible {
                     TextField("Password", text: $password)
                 } else {

@@ -492,6 +492,7 @@ async function analyzeResponsesAndSendFinalPlan() {
     let allMessages = [];
     let unavailableUserIds = [];
     let availableUserNames = [];
+    let availableUserIds = [];
     let originalSuggestions = [];
     
     // First pass to identify which users are unavailable and collect names of available users
@@ -513,6 +514,7 @@ async function analyzeResponsesAndSendFinalPlan() {
         unavailableUserIds.push(userId);
       } else {
         availableUserNames.push(user.fullname);
+        availableUserIds.push(userId);
         allMessages = allMessages.concat(messages);
         
         // Collect original suggestions from event cards
@@ -524,9 +526,9 @@ async function analyzeResponsesAndSendFinalPlan() {
       }
     }
 
-    // If no suggestions were found, skip this chatbot
-    if (originalSuggestions.length === 0) {
-      console.log('No original suggestions found, skipping final plan generation');
+    // If no suggestions were found or no available users, skip this chatbot
+    if (originalSuggestions.length === 0 || availableUserIds.length === 0) {
+      console.log('No original suggestions found or no available users, skipping final plan generation');
       continue;
     }
 
@@ -564,6 +566,45 @@ async function analyzeResponsesAndSendFinalPlan() {
     const finalEventCard = originalSuggestions[selectedIndex];
     finalEventCard.attendees = availableUserNames;
 
+    // Create a group for the attendees
+    const groupId = `group_${chatbot.id}_${admin.firestore.Timestamp.now().toMillis()}`;
+    const groupName = `${finalEventCard.activity} Group`;
+    
+    try {
+      await db.collection('groups').doc(groupId).set({
+        id: groupId,
+        name: groupName,
+        participants: availableUserIds,
+        participantNames: availableUserNames,
+        createdAt: admin.firestore.Timestamp.now(),
+        eventDetails: finalEventCard,
+        lastMessage: null,
+        updatedAt: admin.firestore.Timestamp.now()
+      });
+      
+      console.log(`Created group ${groupId} for event: ${finalEventCard.activity}`);
+      
+      // Send a welcome message to the group
+      const welcomeMessage = {
+        id: admin.firestore.Timestamp.now().toMillis().toString(),
+        text: `Welcome to the ${finalEventCard.activity} group! Use this chat to coordinate and discuss the event details.`,
+        senderId: 'system',
+        senderName: 'System',
+        timestamp: admin.firestore.Timestamp.now()
+      };
+      
+      await db.collection('groups').doc(groupId).collection('messages').add(welcomeMessage);
+      
+      // Update the group's last message
+      await db.collection('groups').doc(groupId).update({
+        lastMessage: welcomeMessage.text,
+        updatedAt: admin.firestore.Timestamp.now()
+      });
+      
+    } catch (error) {
+      console.error('Error creating group:', error);
+    }
+
     // Only send to users who are available
     for (const chatDoc of chatsSnapshot.docs) {
       const userId = chatDoc.data().userId;
@@ -580,7 +621,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       // Send an intro message
       const introMessage = {
         id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Hey ${user.fullname.split(' ')[0]}! Based on everyone's preferences, here's the plan we're going with:`,
+        text: `Hey ${user.fullname.split(' ')[0]}! Based on everyone's preferences, here's the plan we're going with. A group chat has been created for everyone attending to coordinate!`,
         senderId: chatbot.id,
         timestamp: admin.firestore.Timestamp.now(),
         side: 'bot'
@@ -610,7 +651,7 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('11 21 * * 1')
+  .schedule('01 14 * * 3')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
@@ -622,7 +663,7 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('14 21 * * 1')
+  .schedule('04 14 * * 3')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
@@ -634,7 +675,7 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('17 21 * * 1')
+  .schedule('07 14 * * 3')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 

@@ -42,7 +42,7 @@ struct Message: Identifiable, Codable, Equatable {
     var eventCard: EventCard?
 }
 
-struct EventCard: Identifiable, Codable, Equatable {
+struct EventCard: Identifiable, Codable, Equatable, Hashable {
     var type: String
     var activity: String
     var location: String
@@ -63,6 +63,25 @@ struct Chatbot: Identifiable, Codable, Hashable {
     var id: String
     var name: String
     var subscribers: [String]
+}
+
+struct Group: Identifiable, Codable, Hashable {
+    var id: String
+    var name: String
+    var participants: [String] // User IDs
+    var participantNames: [String] // Display names
+    var createdAt: Date
+    var eventDetails: EventCard?
+    var lastMessage: String?
+    var updatedAt: Date
+}
+
+struct GroupMessage: Identifiable, Codable, Equatable {
+    var id: String
+    var text: String
+    var senderId: String
+    var senderName: String
+    var timestamp: Date
 }
 
 struct ParsedAgentResponse {
