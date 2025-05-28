@@ -5,7 +5,6 @@ struct GroupChatView: View {
     let group: Group
     @EnvironmentObject private var vm: ViewModel
     @State private var messageText = ""
-    @State private var showEventDetails = false
     
     private var groupMessages: [GroupMessage] {
         vm.groupMessages[group.id] ?? []
@@ -34,45 +33,6 @@ struct GroupChatView: View {
         }
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    if group.eventDetails != nil {
-                        Button("View Event Details") {
-                            showEventDetails = true
-                        }
-                    }
-                    
-                    Button("Group Info") {
-                        // TODO: Show group info
-                    }
-                    
-                    Button("Leave Group", role: .destructive) {
-                        Task {
-                            await vm.leaveGroup(groupId: group.id)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        .sheet(isPresented: $showEventDetails) {
-            if let eventDetails = group.eventDetails {
-                NavigationView {
-                    EventCardView(eventCard: eventDetails)
-                        .navigationTitle("Event Details")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button("Done") {
-                                    showEventDetails = false
-                                }
-                            }
-                        }
-                }
-            }
-        }
         .onAppear {
             vm.startListeningToGroupMessages(groupId: group.id)
         }

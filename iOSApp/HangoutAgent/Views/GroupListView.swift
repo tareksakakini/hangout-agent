@@ -4,7 +4,6 @@ import FirebaseFirestore
 struct GroupListView: View {
     @EnvironmentObject private var vm: ViewModel
     @State private var selectedGroup: Group?
-    @State private var showingCreateGroup = false
     
     var body: some View {
         NavigationStack {
@@ -24,16 +23,11 @@ struct GroupListView: View {
                                     .font(.title2)
                                     .fontWeight(.medium)
                                 
-                                Text("Create a group to start chatting with multiple people")
+                                Text("You'll see groups here when you're part of an outing. Groups are automatically created when events are planned!")
                                     .font(.body)
                                     .foregroundColor(.secondary)
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal)
-                                
-                                Button("Create Group") {
-                                    showingCreateGroup = true
-                                }
-                                .buttonStyle(.borderedProminent)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
@@ -61,23 +55,13 @@ struct GroupListView: View {
             }
             .navigationTitle("Groups")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Refresh") {
                         Task {
                             await vm.loadGroupsForUser()
                         }
                     }
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("New Group") {
-                        showingCreateGroup = true
-                    }
-                }
-            }
-            .sheet(isPresented: $showingCreateGroup) {
-                CreateGroupView()
-                    .environmentObject(vm)
             }
             .onAppear {
                 Task {
@@ -172,62 +156,6 @@ private struct GroupRowWithNavigation: View {
         .navigationDestination(item: $selectedGroup) { group in
             GroupChatView(group: group)
                 .environmentObject(vm)
-        }
-    }
-}
-
-struct CreateGroupView: View {
-    @EnvironmentObject private var vm: ViewModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var groupName = ""
-    @State private var isCreating = false
-    
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                TextField("Group Name", text: $groupName)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.horizontal)
-                
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("New Group")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Create") {
-                        createGroup()
-                    }
-                    .disabled(groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
-                }
-            }
-        }
-    }
-    
-    private func createGroup() {
-        guard !groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
-        isCreating = true
-        
-        Task {
-            let success = await vm.createGroup(name: groupName.trimmingCharacters(in: .whitespacesAndNewlines))
-            
-            await MainActor.run {
-                isCreating = false
-                if success {
-                    dismiss()
-                } else {
-                    // Could add error handling here
-                    print("Failed to create group")
-                }
-            }
         }
     }
 }
