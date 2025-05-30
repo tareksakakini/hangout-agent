@@ -3,7 +3,7 @@ import FirebaseFirestore
 
 struct GroupListView: View {
     @EnvironmentObject private var vm: ViewModel
-    @State private var selectedGroup: Group?
+    @State private var selectedGroup: HangoutGroup?
     
     var body: some View {
         NavigationStack {
@@ -73,7 +73,7 @@ struct GroupListView: View {
 }
 
 private struct GroupRow: View {
-    let group: Group
+    let group: HangoutGroup
     
     var body: some View {
         HStack(spacing: 16) {
@@ -140,9 +140,9 @@ private struct GroupRow: View {
 }
 
 private struct GroupRowWithNavigation: View {
-    let group: Group
+    let group: HangoutGroup
     @EnvironmentObject private var vm: ViewModel
-    @State private var selectedGroup: Group?
+    @State private var selectedGroup: HangoutGroup?
     
     var body: some View {
         HStack {

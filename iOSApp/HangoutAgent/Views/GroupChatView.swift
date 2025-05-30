@@ -2,7 +2,7 @@ import SwiftUI
 import FirebaseFirestore
 
 struct GroupChatView: View {
-    let group: Group
+    let group: HangoutGroup
     @EnvironmentObject private var vm: ViewModel
     @State private var messageText = ""
     
@@ -123,7 +123,7 @@ struct GroupMessageView: View {
 #Preview {
     NavigationView {
         GroupChatView(
-            group: Group(
+            group: HangoutGroup(
                 id: "preview",
                 name: "Preview Group",
                 participants: ["user1", "user2"],

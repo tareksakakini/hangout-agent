@@ -67,7 +67,7 @@ struct Chatbot: Identifiable, Codable, Hashable {
     var subscribers: [String]
 }
 
-struct Group: Identifiable, Codable, Hashable {
+struct HangoutGroup: Identifiable, Codable, Hashable {
     var id: String
     var name: String
     var participants: [String] // User IDs

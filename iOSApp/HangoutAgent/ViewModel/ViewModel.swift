@@ -14,7 +14,7 @@ class ViewModel: ObservableObject {
     @Published var users: [User] = []
     @Published var chatbots: [Chatbot] = []
     @Published var chats: [Chat] = []
-    @Published var groups: [Group] = []
+    @Published var groups: [HangoutGroup] = []
     @Published var groupMessages: [String: [GroupMessage]] = [:] // groupId -> messages
     
     private var messageListeners: [String: ListenerRegistration] = [:]
@@ -481,7 +481,7 @@ class ViewModel: ObservableObject {
             
             print("📱 Found \(groupsSnapshot.documents.count) groups in Firestore")
             
-            var loadedGroups: [Group] = []
+            var loadedGroups: [HangoutGroup] = []
             
             for groupDoc in groupsSnapshot.documents {
                 let data = groupDoc.data()
@@ -489,7 +489,7 @@ class ViewModel: ObservableObject {
                 print("📱 Group data: \(data)")
                 
                 let dateFormatter = DateFormatter()
-                let group = Group(
+                let group = HangoutGroup(
                     id: data["id"] as? String ?? groupDoc.documentID,
                     name: data["name"] as? String ?? "Unnamed Group",
                     participants: data["participants"] as? [String] ?? [],
