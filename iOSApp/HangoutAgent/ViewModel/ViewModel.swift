@@ -734,48 +734,83 @@ class ViewModel: ObservableObject {
             return (false, "No user signed in")
         }
         
-        do {
-            // Convert image to data
-            guard let imageData = image.jpegData(compressionQuality: 0.7) else {
-                return (false, "Failed to process image")
+        // Helper function to attempt upload with retry logic
+        func attemptUpload(retryCount: Int = 0) async -> (success: Bool, errorMessage: String?) {
+            do {
+                // Convert image to data
+                guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+                    return (false, "Failed to process image")
+                }
+                
+                // Create a unique filename
+                let fileName = "profile_\(user.id)_\(UUID().uuidString).jpg"
+                
+                // Get Firebase Storage reference
+                let storage = Storage.storage()
+                let storageRef = storage.reference()
+                let profileImagesRef = storageRef.child("profile_images/\(fileName)")
+                
+                // Upload image data to Firebase Storage
+                print("📤 Uploading profile image to Firebase Storage... (attempt \(retryCount + 1))")
+                let metadata = StorageMetadata()
+                metadata.contentType = "image/jpeg"
+                
+                let uploadResult = try await profileImagesRef.putDataAsync(imageData, metadata: metadata)
+                print("✅ Upload completed successfully")
+                
+                // Get the download URL
+                let downloadURL = try await profileImagesRef.downloadURL()
+                let imageUrl = downloadURL.absoluteString
+                print("📥 Download URL obtained: \(imageUrl)")
+                
+                // Update user's profile image URL in Firestore
+                let firestoreService = DatabaseManager()
+                try await firestoreService.updateUserProfileImage(uid: user.id, imageUrl: imageUrl)
+                
+                // Update local user object
+                DispatchQueue.main.async {
+                    self.signedInUser?.profileImageUrl = imageUrl
+                }
+                
+                print("✅ Profile image uploaded and updated successfully!")
+                return (true, nil)
+                
+            } catch {
+                print("❌ Error uploading profile image (attempt \(retryCount + 1)): \(error)")
+                
+                // Check if it's an SSL error that we can retry
+                let errorString = error.localizedDescription
+                let isSSLError = errorString.contains("SSL error") || 
+                               errorString.contains("-1200") || 
+                               errorString.contains("secure connection") ||
+                               errorString.contains("NSURLErrorDomain")
+                
+                // Retry logic for SSL errors (max 3 attempts)
+                if isSSLError && retryCount < 2 {
+                    print("🔄 SSL error detected, retrying in 2 seconds... (attempt \(retryCount + 2)/3)")
+                    try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds
+                    return await attemptUpload(retryCount: retryCount + 1)
+                }
+                
+                // Provide user-friendly error messages
+                let errorMessage: String
+                if isSSLError {
+                    errorMessage = "Connection error occurred. This often happens in the iOS Simulator. Try using a physical device or check your network connection."
+                } else if errorString.contains("network") || errorString.contains("internet") {
+                    errorMessage = "Network error. Please check your internet connection and try again."
+                } else if errorString.contains("permission") || errorString.contains("unauthorized") {
+                    errorMessage = "Permission denied. Please try signing out and back in."
+                } else if errorString.contains("quota") || errorString.contains("storage") {
+                    errorMessage = "Storage limit reached. Please contact support."
+                } else {
+                    errorMessage = "Upload failed. Please try again."
+                }
+                
+                return (false, errorMessage)
             }
-            
-            // Create a unique filename
-            let fileName = "profile_\(user.id)_\(UUID().uuidString).jpg"
-            
-            // Get Firebase Storage reference
-            let storage = Storage.storage()
-            let storageRef = storage.reference()
-            let profileImagesRef = storageRef.child("profile_images/\(fileName)")
-            
-            // Upload image data to Firebase Storage
-            print("📤 Uploading profile image to Firebase Storage...")
-            let metadata = StorageMetadata()
-            metadata.contentType = "image/jpeg"
-            
-            let uploadResult = try await profileImagesRef.putDataAsync(imageData, metadata: metadata)
-            print("✅ Upload completed successfully")
-            
-            // Get the download URL
-            let downloadURL = try await profileImagesRef.downloadURL()
-            let imageUrl = downloadURL.absoluteString
-            print("📥 Download URL obtained: \(imageUrl)")
-            
-            // Update user's profile image URL in Firestore
-            let firestoreService = DatabaseManager()
-            try await firestoreService.updateUserProfileImage(uid: user.id, imageUrl: imageUrl)
-            
-            // Update local user object
-            DispatchQueue.main.async {
-                self.signedInUser?.profileImageUrl = imageUrl
-            }
-            
-            print("✅ Profile image uploaded and updated successfully!")
-            return (true, nil)
-        } catch {
-            print("❌ Error uploading profile image: \(error)")
-            return (false, "Failed to upload image: \(error.localizedDescription)")
         }
+        
+        return await attemptUpload()
     }
     
     func removeProfileImage() async -> (success: Bool, errorMessage: String?) {

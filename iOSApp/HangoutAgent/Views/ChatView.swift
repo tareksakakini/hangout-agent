@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var isRemovingImage = false
     @State private var showPhotoActionSheet = false
     @State private var showPhotoPicker = false
+    @State private var selectedImage: UIImage?
+    @State private var showImageCrop = false
     
     var body: some View {
         NavigationStack {
@@ -106,7 +108,28 @@ struct ChatView: View {
         .onChange(of: selectedPhotoItem) { oldValue, newValue in
             Task {
                 if let photoItem = newValue {
-                    await uploadProfileImage(from: photoItem)
+                    // Convert PhotosPickerItem to UIImage for cropping
+                    do {
+                        guard let imageData = try await photoItem.loadTransferable(type: Data.self),
+                              let uiImage = UIImage(data: imageData) else {
+                            uploadResult = (false, "Failed to process image")
+                            showUploadResult = true
+                            selectedPhotoItem = nil
+                            return
+                        }
+                        
+                        DispatchQueue.main.async {
+                            self.selectedImage = uiImage
+                            self.showImageCrop = true
+                            self.selectedPhotoItem = nil // Clear the picker selection
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.uploadResult = (false, "Failed to load image")
+                            self.showUploadResult = true
+                            self.selectedPhotoItem = nil
+                        }
+                    }
                 }
             }
         }
@@ -144,6 +167,24 @@ struct ChatView: View {
             }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .sheet(isPresented: $showImageCrop) {
+            if let image = selectedImage {
+                ImageCropView(
+                    image: image,
+                    onCrop: { croppedImage in
+                        Task {
+                            await uploadProfileImage(croppedImage)
+                        }
+                        showImageCrop = false
+                        selectedImage = nil
+                    },
+                    onCancel: {
+                        showImageCrop = false
+                        selectedImage = nil
+                    }
+                )
+            }
+        }
     }
     
     private func logChatState() {
@@ -170,52 +211,26 @@ struct ChatView: View {
         }
     }
     
-    private func uploadProfileImage(from photoItem: PhotosPickerItem) async {
+    private func uploadProfileImage(_ uiImage: UIImage) async {
         isUploadingImage = true
         showUploadResult = false
         
-        do {
-            // Convert PhotosPickerItem to UIImage
-            guard let imageData = try await photoItem.loadTransferable(type: Data.self),
-                  let uiImage = UIImage(data: imageData) else {
-                uploadResult = (false, "Failed to process image")
-                showUploadResult = true
-                isUploadingImage = false
-                return
+        // Upload the image
+        let result = await vm.uploadProfileImage(uiImage)
+        
+        DispatchQueue.main.async {
+            self.isUploadingImage = false
+            self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
+            self.showUploadResult = true
+            
+            // Force image refresh on successful upload
+            if result.success {
+                self.imageRefreshId = UUID()
             }
             
-            // Upload the image
-            let result = await vm.uploadProfileImage(uiImage)
-            
-            DispatchQueue.main.async {
-                self.isUploadingImage = false
-                self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
-                self.showUploadResult = true
-                
-                // Force image refresh on successful upload
-                if result.success {
-                    self.imageRefreshId = UUID()
-                }
-                
-                // Auto-hide the message after a few seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.showUploadResult = false
-                }
-                
-                // Clear the selected photo item
-                self.selectedPhotoItem = nil
-            }
-        } catch {
-            DispatchQueue.main.async {
-                self.isUploadingImage = false
-                self.uploadResult = (false, "Failed to load image")
-                self.showUploadResult = true
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.showUploadResult = false
-                }
-                
-                self.selectedPhotoItem = nil
+            // Auto-hide the message after a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showUploadResult = false
             }
         }
     }
@@ -1010,6 +1025,8 @@ struct ProfileView: View {
     @State private var imageRefreshId = UUID()
     @State private var isRemovingImage = false
     @State private var showPhotoActionSheet = false
+    @State private var selectedImage: UIImage?
+    @State private var showImageCrop = false
     
     var body: some View {
         ScrollView {
@@ -1399,6 +1416,24 @@ struct ProfileView: View {
             }
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .sheet(isPresented: $showImageCrop) {
+            if let image = selectedImage {
+                ImageCropView(
+                    image: image,
+                    onCrop: { croppedImage in
+                        Task {
+                            await uploadProfileImage(croppedImage)
+                        }
+                        showImageCrop = false
+                        selectedImage = nil
+                    },
+                    onCancel: {
+                        showImageCrop = false
+                        selectedImage = nil
+                    }
+                )
+            }
+        }
         .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
             // Force image refresh when profile URL changes
             if oldValue != newValue && newValue != nil {
@@ -1408,58 +1443,53 @@ struct ProfileView: View {
         .onChange(of: selectedPhotoItem) { oldValue, newValue in
             Task {
                 if let photoItem = newValue {
-                    await uploadProfileImage(from: photoItem)
+                    // Convert PhotosPickerItem to UIImage for cropping
+                    do {
+                        guard let imageData = try await photoItem.loadTransferable(type: Data.self),
+                              let uiImage = UIImage(data: imageData) else {
+                            uploadResult = (false, "Failed to process image")
+                            showUploadResult = true
+                            selectedPhotoItem = nil
+                            return
+                        }
+                        
+                        DispatchQueue.main.async {
+                            self.selectedImage = uiImage
+                            self.showImageCrop = true
+                            self.selectedPhotoItem = nil // Clear the picker selection
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.uploadResult = (false, "Failed to load image")
+                            self.showUploadResult = true
+                            self.selectedPhotoItem = nil
+                        }
+                    }
                 }
             }
         }
     }
     
-    private func uploadProfileImage(from photoItem: PhotosPickerItem) async {
+    private func uploadProfileImage(_ uiImage: UIImage) async {
         isUploadingImage = true
         showUploadResult = false
         
-        do {
-            // Convert PhotosPickerItem to UIImage
-            guard let imageData = try await photoItem.loadTransferable(type: Data.self),
-                  let uiImage = UIImage(data: imageData) else {
-                uploadResult = (false, "Failed to process image")
-                showUploadResult = true
-                isUploadingImage = false
-                return
+        // Upload the image
+        let result = await vm.uploadProfileImage(uiImage)
+        
+        DispatchQueue.main.async {
+            self.isUploadingImage = false
+            self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
+            self.showUploadResult = true
+            
+            // Force image refresh on successful upload
+            if result.success {
+                self.imageRefreshId = UUID()
             }
             
-            // Upload the image
-            let result = await vm.uploadProfileImage(uiImage)
-            
-            DispatchQueue.main.async {
-                self.isUploadingImage = false
-                self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
-                self.showUploadResult = true
-                
-                // Force image refresh on successful upload
-                if result.success {
-                    self.imageRefreshId = UUID()
-                }
-                
-                // Auto-hide the message after a few seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.showUploadResult = false
-                }
-                
-                // Clear the selected photo item
-                self.selectedPhotoItem = nil
-            }
-        } catch {
-            DispatchQueue.main.async {
-                self.isUploadingImage = false
-                self.uploadResult = (false, "Failed to load image")
-                self.showUploadResult = true
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.showUploadResult = false
-                }
-                
-                self.selectedPhotoItem = nil
+            // Auto-hide the message after a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showUploadResult = false
             }
         }
     }
@@ -2244,5 +2274,181 @@ struct ForgotPasswordView: View {
                 }
             }
         }
+    }
+}
+
+struct ImageCropView: View {
+    let image: UIImage
+    let onCrop: (UIImage) -> Void
+    let onCancel: () -> Void
+    
+    @State private var currentOffset = CGSize.zero
+    @State private var finalOffset = CGSize.zero
+    @State private var scale: CGFloat = 1.0
+    @State private var finalScale: CGFloat = 1.0
+    
+    var body: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    
+                    // Image
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .scaleEffect(scale)
+                        .offset(x: finalOffset.width + currentOffset.width, 
+                               y: finalOffset.height + currentOffset.height)
+                        .gesture(
+                            SimultaneousGesture(
+                                // Pan gesture
+                                DragGesture()
+                                    .onChanged { value in
+                                        currentOffset = value.translation
+                                    }
+                                    .onEnded { value in
+                                        finalOffset.width += value.translation.width
+                                        finalOffset.height += value.translation.height
+                                        currentOffset = .zero
+                                    },
+                                // Pinch gesture for zoom
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        scale = finalScale * value
+                                        scale = min(max(scale, 0.5), 3.0)
+                                    }
+                                    .onEnded { value in
+                                        finalScale = scale
+                                    }
+                            )
+                        )
+                    
+                    // Crop overlay - with allowsHitTesting(false) to not block touches
+                    CropOverlayView(geometry: geometry)
+                        .allowsHitTesting(false)
+                }
+            }
+            .navigationTitle("Crop Image")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        cropImage()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+    
+    private func cropImage() {
+        // Calculate the crop area based on user's pan and zoom
+        let cropAreaSize: CGFloat = 300 // The size of our crop overlay
+        let imageSize = image.size
+        
+        // Calculate the actual crop rectangle in the image's coordinate system
+        let imageAspectRatio = imageSize.width / imageSize.height
+        let displayImageSize: CGSize
+        
+        // Determine how the image is displayed (fit aspect ratio)
+        if imageAspectRatio > 1 {
+            // Landscape image
+            displayImageSize = CGSize(width: cropAreaSize * imageAspectRatio, height: cropAreaSize)
+        } else {
+            // Portrait image  
+            displayImageSize = CGSize(width: cropAreaSize, height: cropAreaSize / imageAspectRatio)
+        }
+        
+        // Apply the scale factor
+        let scaledDisplaySize = CGSize(
+            width: displayImageSize.width * scale,
+            height: displayImageSize.height * scale
+        )
+        
+        // Calculate the center point of the crop area
+        let cropCenterX = cropAreaSize / 2
+        let cropCenterY = cropAreaSize / 2
+        
+        // Account for the user's pan offset
+        let totalOffsetX = finalOffset.width + currentOffset.width
+        let totalOffsetY = finalOffset.height + currentOffset.height
+        
+        // Calculate the crop rectangle in the scaled image's coordinate system
+        let cropRect = CGRect(
+            x: (scaledDisplaySize.width / 2) - cropCenterX - totalOffsetX,
+            y: (scaledDisplaySize.height / 2) - cropCenterY - totalOffsetY,
+            width: cropAreaSize,
+            height: cropAreaSize
+        )
+        
+        // Convert to original image coordinates
+        let scaleToOriginal = max(imageSize.width / scaledDisplaySize.width, imageSize.height / scaledDisplaySize.height)
+        let originalCropRect = CGRect(
+            x: cropRect.origin.x * scaleToOriginal,
+            y: cropRect.origin.y * scaleToOriginal,
+            width: cropRect.width * scaleToOriginal,
+            height: cropRect.height * scaleToOriginal
+        )
+        
+        // Ensure the crop rect is within image bounds
+        let clampedCropRect = CGRect(
+            x: max(0, min(originalCropRect.origin.x, imageSize.width - originalCropRect.width)),
+            y: max(0, min(originalCropRect.origin.y, imageSize.height - originalCropRect.height)),
+            width: min(originalCropRect.width, imageSize.width),
+            height: min(originalCropRect.height, imageSize.height)
+        )
+        
+        // Perform the actual crop
+        guard let cgImage = image.cgImage?.cropping(to: clampedCropRect) else {
+            // Fallback to resizing if cropping fails
+            let resizedImage = resizeImage(image, to: CGSize(width: 400, height: 400))
+            onCrop(resizedImage)
+            return
+        }
+        
+        let croppedUIImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        
+        // Resize the cropped image to final size
+        let finalImage = resizeImage(croppedUIImage, to: CGSize(width: 400, height: 400))
+        onCrop(finalImage)
+    }
+    
+    private func resizeImage(_ image: UIImage, to size: CGSize) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
+struct CropOverlayView: View {
+    let geometry: GeometryProxy
+    
+    var body: some View {
+        ZStack {
+            // Semi-transparent overlay
+            Color.black.opacity(0.5)
+            
+            // Crop area (clear rectangle in the center)
+            Rectangle()
+                .frame(width: min(geometry.size.width - 40, 300), 
+                      height: min(geometry.size.width - 40, 300))
+                .blendMode(.destinationOut)
+        }
+        .compositingGroup()
+        .overlay(
+            // Crop border
+            Rectangle()
+                .stroke(Color.white, lineWidth: 2)
+                .frame(width: min(geometry.size.width - 40, 300), 
+                      height: min(geometry.size.width - 40, 300))
+        )
     }
 }
