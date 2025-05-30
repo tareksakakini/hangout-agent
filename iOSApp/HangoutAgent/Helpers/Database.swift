@@ -22,7 +22,8 @@ class DatabaseManager {
             "fullname": fullname,
             "username": username,
             "email": email,
-            "subscriptions": []
+            "subscriptions": [],
+            "isEmailVerified": false  // Initially false, will be updated when verified
         ]
         
         do {
@@ -371,5 +372,20 @@ class DatabaseManager {
                 print("📤 Sending \(messages.count) messages to UI")
                 onUpdate(messages)
             }
+    }
+    
+    // Update user email verification status
+    func updateEmailVerificationStatus(uid: String, isVerified: Bool) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "isEmailVerified": isVerified
+            ])
+            print("✅ Email verification status updated for user: \(uid)")
+        } catch {
+            print("❌ Error updating email verification status: \(error.localizedDescription)")
+            throw error
+        }
     }
 }

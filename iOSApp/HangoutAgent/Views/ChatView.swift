@@ -412,27 +412,35 @@ struct HomeView: View {
     var body: some View {
         if vm.signedInUser != nil {
             NavigationStack {
-                TabView(selection: $selectedTab) {
-                    ChatListView(showCreateChatbot: $showCreateChatbot)
-                        .tabItem {
-                            Image(systemName: "message")
-                            Text("Chats")
-                        }
-                        .tag(0)
+                VStack(spacing: 0) {
+                    // Email verification banner
+                    if let user = vm.signedInUser, !user.isEmailVerified {
+                        EmailVerificationBanner()
+                            .environmentObject(vm)
+                    }
                     
-                    GroupListView()
-                        .tabItem {
-                            Image(systemName: "person.3")
-                            Text("Groups")
-                        }
-                        .tag(1)
-                    
-                    ProfileView()
-                        .tabItem {
-                            Image(systemName: "person.circle")
-                            Text("Profile")
-                        }
-                        .tag(2)
+                    TabView(selection: $selectedTab) {
+                        ChatListView(showCreateChatbot: $showCreateChatbot)
+                            .tabItem {
+                                Image(systemName: "message")
+                                Text("Chats")
+                            }
+                            .tag(0)
+                        
+                        GroupListView()
+                            .tabItem {
+                                Image(systemName: "person.3")
+                                Text("Groups")
+                            }
+                            .tag(1)
+                        
+                        ProfileView()
+                            .tabItem {
+                                Image(systemName: "person.circle")
+                                Text("Profile")
+                            }
+                            .tag(2)
+                    }
                 }
                 .navigationTitle(selectedTab == 0 ? "Chats" : selectedTab == 1 ? "Groups" : "Profile")
                 .toolbar {
@@ -455,6 +463,65 @@ struct HomeView: View {
         } else {
             ProgressView()
         }
+    }
+}
+
+struct EmailVerificationBanner: View {
+    @EnvironmentObject private var vm: ViewModel
+    @State private var isCheckingVerification = false
+    @State private var isResendingEmail = false
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "envelope.badge.fill")
+                .foregroundColor(.orange)
+                .font(.title3)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Please verify your email")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                Text("Check your inbox for a verification link")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            HStack(spacing: 8) {
+                Button("Check") {
+                    Task {
+                        isCheckingVerification = true
+                        await vm.checkEmailVerificationStatus()
+                        isCheckingVerification = false
+                    }
+                } 
+                .font(.caption.bold())
+                .foregroundColor(.blue)
+                .disabled(isCheckingVerification)
+                
+                Button("Resend") {
+                    Task {
+                        isResendingEmail = true
+                        _ = await vm.resendVerificationEmail()
+                        isResendingEmail = false
+                    }
+                }
+                .font(.caption.bold())
+                .foregroundColor(.orange)
+                .disabled(isResendingEmail)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.orange.opacity(0.1))
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(Color.orange.opacity(0.3)),
+            alignment: .bottom
+        )
     }
 }
 
@@ -674,6 +741,7 @@ struct SignupView: View {
     @State var goToNextScreen: Bool = false
     @State var isPasswordVisible = false
     @State var user: User? = nil
+    @State var showSuccessMessage = false
     
     var body: some View {
         ZStack {
@@ -695,6 +763,27 @@ struct SignupView: View {
                     .padding(.bottom, 20)
                 
                 SignupSheet
+                
+                // Success message
+                if showSuccessMessage {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Account created successfully!")
+                                .font(.headline)
+                                .foregroundColor(.green)
+                        }
+                        Text("Please check your email to verify your account")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
                 
                 Spacer()
             }
@@ -797,7 +886,12 @@ extension SignupView {
                 if let signedUpUser = await vm.signupButtonPressed(fullname: fullname, username: username, email: email, password: password) {
                     DispatchQueue.main.async {
                         vm.signedInUser = signedUpUser
-                        dismiss()
+                        showSuccessMessage = true
+                        
+                        // Auto-dismiss after 2 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            dismiss()
+                        }
                     }
                 }
             }

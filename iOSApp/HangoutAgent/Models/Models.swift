@@ -21,6 +21,7 @@ struct User: Identifiable, Codable {
     var email: String = ""
     var password: String = ""
     var subscriptions: [String] = []
+    var isEmailVerified: Bool = false
     
     func initFromFirestore(userData: [String: Any]) -> User {
         var user = User()
@@ -29,6 +30,7 @@ struct User: Identifiable, Codable {
         user.username = userData["username"] as? String ?? ""
         user.email = userData["email"] as? String ?? ""
         user.subscriptions = userData["subscriptions"] as? [String] ?? []
+        user.isEmailVerified = userData["isEmailVerified"] as? Bool ?? false
         return user
     }
 }

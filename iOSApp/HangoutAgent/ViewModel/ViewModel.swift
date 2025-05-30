@@ -52,7 +52,8 @@ class ViewModel: ObservableObject {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
             let firestoreService = DatabaseManager()
             try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email)
-            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email)
+            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false)
+            print("📧 Account created successfully! Please check your email to verify your account.")
             return user
         } catch {
             print(error)
@@ -63,8 +64,25 @@ class ViewModel: ObservableObject {
     func signinButtonPressed(email: String, password: String) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signin(email: email, password: password)
+            
+            // Reload user to get latest verification status
+            try await AuthManager.shared.reloadUser()
+            
             let firestoreService = DatabaseManager()
-            let user = try await firestoreService.getUserFromFirestore(uid: authUser.uid)
+            var user = try await firestoreService.getUserFromFirestore(uid: authUser.uid)
+            
+            // Check if Firebase Auth verification status differs from Firestore
+            let authVerificationStatus = AuthManager.shared.isEmailVerified()
+            if authVerificationStatus != user.isEmailVerified {
+                // Update Firestore to match Firebase Auth
+                try await firestoreService.updateEmailVerificationStatus(uid: authUser.uid, isVerified: authVerificationStatus)
+                user.isEmailVerified = authVerificationStatus
+                
+                if authVerificationStatus {
+                    print("✅ Email verification status updated - user is now verified!")
+                }
+            }
+            
             return user
         } catch {
             print(error)
@@ -202,8 +220,23 @@ class ViewModel: ObservableObject {
     func loadSignedInUser() async {
         do {
             if let firebaseUser = AuthManager.shared.getCurrentUser() {
+                // Reload Firebase user to get latest verification status
+                try await AuthManager.shared.reloadUser()
+                
                 let firestoreService = DatabaseManager()
-                let user = try await firestoreService.getUserFromFirestore(uid: firebaseUser.uid)
+                var user = try await firestoreService.getUserFromFirestore(uid: firebaseUser.uid)
+                
+                // Sync verification status between Firebase Auth and Firestore
+                let authVerificationStatus = AuthManager.shared.isEmailVerified()
+                if authVerificationStatus != user.isEmailVerified {
+                    try await firestoreService.updateEmailVerificationStatus(uid: firebaseUser.uid, isVerified: authVerificationStatus)
+                    user.isEmailVerified = authVerificationStatus
+                    
+                    if authVerificationStatus {
+                        print("✅ Email verification status synced - user is verified!")
+                    }
+                }
+                
                 DispatchQueue.main.async {
                     self.signedInUser = user
                 }
@@ -581,6 +614,45 @@ class ViewModel: ObservableObject {
             
         } catch {
             print("Error leaving group: \(error)")
+        }
+    }
+    
+    // Check and update email verification status
+    func checkEmailVerificationStatus() async {
+        guard let user = signedInUser else { return }
+        
+        do {
+            // Reload Firebase Auth user to get latest verification status
+            try await AuthManager.shared.reloadUser()
+            let authVerificationStatus = AuthManager.shared.isEmailVerified()
+            
+            // Update if status has changed
+            if authVerificationStatus != user.isEmailVerified {
+                let firestoreService = DatabaseManager()
+                try await firestoreService.updateEmailVerificationStatus(uid: user.id, isVerified: authVerificationStatus)
+                
+                DispatchQueue.main.async {
+                    self.signedInUser?.isEmailVerified = authVerificationStatus
+                }
+                
+                if authVerificationStatus {
+                    print("✅ Email verification confirmed!")
+                }
+            }
+        } catch {
+            print("❌ Error checking email verification status: \(error)")
+        }
+    }
+    
+    // Resend verification email
+    func resendVerificationEmail() async -> Bool {
+        do {
+            try await AuthManager.shared.sendEmailVerification()
+            print("📧 Verification email sent successfully!")
+            return true
+        } catch {
+            print("❌ Error sending verification email: \(error)")
+            return false
         }
     }
 }
