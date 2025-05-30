@@ -859,120 +859,522 @@ struct ProfileView: View {
     @State private var isDeletingAccount = false
     @State private var deleteResult: (success: Bool, message: String)? = nil
     @State private var showDeleteResult = false
+    @State private var showChangePassword = false
     
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            
-            // Account deletion result message
-            if showDeleteResult, let result = deleteResult {
-                VStack(spacing: 8) {
-                    HStack {
-                        Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(result.success ? .green : .red)
-                        Text(result.success ? "Account Deleted Successfully" : "Account Deletion Failed")
-                            .font(.headline)
-                            .foregroundColor(result.success ? .green : .red)
+        ScrollView {
+            VStack(spacing: 24) {
+                // User Info Section
+                if let user = vm.signedInUser {
+                    VStack(spacing: 20) {
+                        // Profile Avatar
+                        Circle()
+                            .fill(LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.blue]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ))
+                            .frame(width: 100, height: 100)
+                            .overlay(
+                                Text(user.fullname.prefix(1))
+                                    .font(.largeTitle.bold())
+                                    .foregroundColor(.white)
+                            )
+                            .shadow(color: Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
+                        
+                        // User Info Card
+                        VStack(spacing: 16) {
+                            Text(user.fullname)
+                                .font(.title2.bold())
+                                .foregroundColor(.primary)
+                            
+                            VStack(spacing: 12) {
+                                HStack {
+                                    Image(systemName: "person.circle.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.title3)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Username")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Text(user.username)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    Spacer()
+                                }
+                                
+                                Divider()
+                                
+                                HStack {
+                                    Image(systemName: "envelope.circle.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.title3)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Email")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Text(user.email)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // Verification status
+                                    if user.isEmailVerified {
+                                        HStack {
+                                            Image(systemName: "checkmark.seal.fill")
+                                                .foregroundColor(.green)
+                                            Text("Verified")
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                    } else {
+                                        HStack {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .foregroundColor(.orange)
+                                            Text("Unverified")
+                                                .font(.caption)
+                                                .foregroundColor(.orange)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color.white)
+                        .cornerRadius(16)
+                        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                }
+                
+                // Account deletion result message
+                if showDeleteResult, let result = deleteResult {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(result.success ? .green : .red)
+                            Text(result.success ? "Account Deleted Successfully" : "Account Deletion Failed")
+                                .font(.headline)
+                                .foregroundColor(result.success ? .green : .red)
+                        }
+                        
+                        Text(result.message)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .padding()
+                    .background((result.success ? Color.green : Color.red).opacity(0.1))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    .transition(.scale.combined(with: .opacity))
+                }
+                
+                // Actions Section
+                VStack(spacing: 16) {
+                    // Change Password Button
+                    Button(action: {
+                        showChangePassword = true
+                    }) {
+                        HStack {
+                            Image(systemName: "key.fill")
+                                .foregroundColor(.white)
+                            Text("Change Password")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                        .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 3)
                     }
                     
-                    Text(result.message)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-                .padding()
-                .background((result.success ? Color.green : Color.red).opacity(0.1))
-                .cornerRadius(12)
-                .padding(.horizontal)
-                .transition(.scale.combined(with: .opacity))
-            }
-            
-            Button(action: {
-                Task {
-                    await vm.signoutButtonPressed()
-                    dismiss()
-                }
-            }) {
-                Text("Sign Out")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .cornerRadius(12)
-            }
-            .padding(.horizontal)
-            
-            Button(action: {
-                showDeleteConfirmation = true
-            }) {
-                HStack {
-                    if isDeletingAccount {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: "trash")
+                    // Sign Out Button
+                    Button(action: {
+                        Task {
+                            await vm.signoutButtonPressed()
+                            dismiss()
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.right.square.fill")
+                                .foregroundColor(.white)
+                            Text("Sign Out")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.orange)
+                        .cornerRadius(12)
+                        .shadow(color: Color.orange.opacity(0.3), radius: 5, x: 0, y: 3)
                     }
-                    Text(isDeletingAccount ? "Deleting Account..." : "Delete Account")
+                    
+                    // Delete Account Button
+                    Button(action: {
+                        showDeleteConfirmation = true
+                    }) {
+                        HStack {
+                            if isDeletingAccount {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "trash.fill")
+                                    .foregroundColor(.white)
+                            }
+                            Text(isDeletingAccount ? "Deleting Account..." : "Delete Account")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isDeletingAccount ? Color.gray : Color.red)
+                        .cornerRadius(12)
+                        .shadow(color: (isDeletingAccount ? Color.gray : Color.red).opacity(0.3), radius: 5, x: 0, y: 3)
+                    }
+                    .disabled(isDeletingAccount)
                 }
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(isDeletingAccount ? Color.gray : Color.red)
-                .cornerRadius(12)
+                .padding(.horizontal)
+                
+                Spacer(minLength: 40)
             }
-            .disabled(isDeletingAccount)
-            .padding(.horizontal)
-            .confirmationDialog(
-                "Delete Account",
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Delete Account", role: .destructive) {
-                    Task {
-                        isDeletingAccount = true
-                        hideDeleteResult() // Hide any previous result
+        }
+        .background(Color(.systemGray6))
+        .navigationTitle("Profile")
+        .sheet(isPresented: $showChangePassword) {
+            ChangePasswordView()
+                .environmentObject(vm)
+        }
+        .confirmationDialog(
+            "Delete Account",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                Task {
+                    isDeletingAccount = true
+                    hideDeleteResult() // Hide any previous result
+                    
+                    let result = await vm.deleteAccountButtonPressed()
+                    
+                    isDeletingAccount = false
+                    
+                    if result.success {
+                        deleteResult = (true, "Your account has been permanently deleted.")
+                        showDeleteResult = true
                         
-                        let result = await vm.deleteAccountButtonPressed()
+                        // Auto-dismiss after success
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            dismiss()
+                        }
+                    } else {
+                        deleteResult = (false, result.errorMessage ?? "Unknown error occurred")
+                        showDeleteResult = true
                         
-                        isDeletingAccount = false
-                        
-                        if result.success {
-                            deleteResult = (true, "Your account has been permanently deleted.")
-                            showDeleteResult = true
-                            
-                            // Auto-dismiss after success
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                                dismiss()
-                            }
-                        } else {
-                            deleteResult = (false, result.errorMessage ?? "Unknown error occurred")
-                            showDeleteResult = true
-                            
-                            // Auto-hide error message after 8 seconds
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
-                                hideDeleteResult()
-                            }
+                        // Auto-hide error message after 8 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+                            hideDeleteResult()
                         }
                     }
                 }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This action cannot be undone. Your account and all associated data will be permanently deleted.")
             }
-            
-            Spacer()
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This action cannot be undone. Your account and all associated data will be permanently deleted.")
         }
-        .navigationTitle("Profile")
     }
     
     private func hideDeleteResult() {
         withAnimation {
             showDeleteResult = false
             deleteResult = nil
+        }
+    }
+}
+
+struct ChangePasswordView: View {
+    @EnvironmentObject private var vm: ViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var currentPassword: String = ""
+    @State private var newPassword: String = ""
+    @State private var confirmPassword: String = ""
+    @State private var isLoading = false
+    @State private var showResult = false
+    @State private var resultMessage = ""
+    @State private var isSuccess = false
+    @State private var isCurrentPasswordVisible = false
+    @State private var isNewPasswordVisible = false
+    @State private var isConfirmPasswordVisible = false
+    
+    private var canChangePassword: Bool {
+        let hasCurrentPassword = !currentPassword.isEmpty
+        let hasNewPassword = !newPassword.isEmpty
+        let hasConfirmPassword = !confirmPassword.isEmpty
+        let passwordsMatch = newPassword == confirmPassword
+        let isPasswordLongEnough = newPassword.count >= 6
+        
+        let basicFieldsComplete = hasCurrentPassword && hasNewPassword && hasConfirmPassword
+        let passwordValidation = passwordsMatch && isPasswordLongEnough
+        
+        return basicFieldsComplete && passwordValidation
+    }
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header section
+                    self.headerSection
+                    
+                    // Result message section
+                    if showResult {
+                        self.resultSection
+                    }
+                    
+                    // Form section
+                    self.formSection
+                    
+                    // Action button section
+                    self.actionSection
+                    
+                    Spacer(minLength: 20)
+                }
+                .padding()
+            }
+            .background(Color(.systemGray6))
+            .navigationTitle("Change Password")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private var headerSection: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "key.circle.fill")
+                .font(.system(size: 80))
+                .foregroundColor(.blue)
+            
+            Text("Change Password")
+                .font(.largeTitle.bold())
+                .foregroundColor(.primary)
+            
+            Text("Enter your current password and choose a new one. Your new password must be at least 6 characters long.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+    
+    private var resultSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(isSuccess ? .green : .red)
+                Text(isSuccess ? "Password Changed!" : "Change Failed")
+                    .font(.headline)
+                    .foregroundColor(isSuccess ? .green : .red)
+            }
+            
+            Text(resultMessage)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .background((isSuccess ? Color.green : Color.red).opacity(0.1))
+        .cornerRadius(12)
+        .transition(.scale.combined(with: .opacity))
+    }
+    
+    private var formSection: some View {
+        VStack(spacing: 20) {
+            self.currentPasswordField
+            self.newPasswordField
+            self.confirmPasswordField
+        }
+    }
+    
+    private var currentPasswordField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Current Password")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            HStack {
+                SwiftUI.Group {
+                    if isCurrentPasswordVisible {
+                        TextField("Enter current password", text: $currentPassword)
+                    } else {
+                        SecureField("Enter current password", text: $currentPassword)
+                    }
+                }
+                .padding()
+                .background(Color.white)
+                .cornerRadius(12)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                
+                Button(action: {
+                    isCurrentPasswordVisible.toggle()
+                }) {
+                    Image(systemName: isCurrentPasswordVisible ? "eye.fill" : "eye.slash.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+    }
+    
+    private var newPasswordField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("New Password")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            HStack {
+                SwiftUI.Group {
+                    if isNewPasswordVisible {
+                        TextField("Enter new password", text: $newPassword)
+                    } else {
+                        SecureField("Enter new password", text: $newPassword)
+                    }
+                }
+                .padding()
+                .background(Color.white)
+                .cornerRadius(12)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                
+                Button(action: {
+                    isNewPasswordVisible.toggle()
+                }) {
+                    Image(systemName: isNewPasswordVisible ? "eye.fill" : "eye.slash.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if !newPassword.isEmpty && newPassword.count < 6 {
+                Text("Password must be at least 6 characters")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+    }
+    
+    private var confirmPasswordField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Confirm New Password")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            HStack {
+                SwiftUI.Group {
+                    if isConfirmPasswordVisible {
+                        TextField("Confirm new password", text: $confirmPassword)
+                    } else {
+                        SecureField("Confirm new password", text: $confirmPassword)
+                    }
+                }
+                .padding()
+                .background(Color.white)
+                .cornerRadius(12)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                
+                Button(action: {
+                    isConfirmPasswordVisible.toggle()
+                }) {
+                    Image(systemName: isConfirmPasswordVisible ? "eye.fill" : "eye.slash.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if !confirmPassword.isEmpty && newPassword != confirmPassword {
+                Text("Passwords do not match")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+    }
+    
+    private var actionSection: some View {
+        Button(action: {
+            Task {
+                await changePassword()
+            }
+        }) {
+            HStack {
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(.white)
+                } else {
+                    Image(systemName: "key.fill")
+                }
+                Text(isLoading ? "Changing Password..." : "Change Password")
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(canChangePassword && !isLoading ? Color.blue : Color.gray)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+            .shadow(radius: 5)
+        }
+        .disabled(!canChangePassword || isLoading)
+    }
+    
+    private func changePassword() async {
+        isLoading = true
+        showResult = false
+        
+        let result = await vm.changePassword(
+            currentPassword: currentPassword,
+            newPassword: newPassword
+        )
+        
+        isLoading = false
+        isSuccess = result.success
+        
+        if result.success {
+            resultMessage = "Your password has been changed successfully!"
+            
+            // Clear the form
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+            
+            // Auto-dismiss after success
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                dismiss()
+            }
+        } else {
+            resultMessage = result.errorMessage ?? "Failed to change password"
+        }
+        
+        showResult = true
+        
+        // Auto-hide error message after some time
+        if !result.success {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+                showResult = false
+            }
         }
     }
 }

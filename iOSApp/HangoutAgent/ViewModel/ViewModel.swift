@@ -698,4 +698,30 @@ class ViewModel: ObservableObject {
             return (false, errorMessage)
         }
     }
+    
+    // Change password
+    func changePassword(currentPassword: String, newPassword: String) async -> (success: Bool, errorMessage: String?) {
+        do {
+            try await AuthManager.shared.changePassword(currentPassword: currentPassword, newPassword: newPassword)
+            return (true, nil)
+        } catch {
+            print("❌ Error changing password: \(error)")
+            
+            // Provide user-friendly error messages
+            let errorMessage: String
+            if error.localizedDescription.contains("wrong-password") || error.localizedDescription.contains("invalid-credential") {
+                errorMessage = "Current password is incorrect. Please try again."
+            } else if error.localizedDescription.contains("weak-password") {
+                errorMessage = "New password is too weak. Please choose a stronger password."
+            } else if error.localizedDescription.contains("requires-recent-login") {
+                errorMessage = "For security reasons, please sign out and sign back in, then try changing your password again."
+            } else if error.localizedDescription.contains("network") || error.localizedDescription.contains("internet") {
+                errorMessage = "Network error. Please check your internet connection and try again."
+            } else {
+                errorMessage = "Failed to change password. Please try again."
+            }
+            
+            return (false, errorMessage)
+        }
+    }
 }

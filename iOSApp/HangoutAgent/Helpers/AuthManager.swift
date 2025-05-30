@@ -88,4 +88,28 @@ class AuthManager {
             throw error
         }
     }
+    
+    // Change password for current user
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw NSError(domain: "AuthError", code: 404, userInfo: [NSLocalizedDescriptionKey: "No user signed in"])
+        }
+        
+        guard let email = user.email else {
+            throw NSError(domain: "AuthError", code: 400, userInfo: [NSLocalizedDescriptionKey: "User email not found"])
+        }
+        
+        do {
+            // Re-authenticate user with current password
+            let credential = EmailAuthProvider.credential(withEmail: email, password: currentPassword)
+            try await user.reauthenticate(with: credential)
+            
+            // Update to new password
+            try await user.updatePassword(to: newPassword)
+            print("✅ Password updated successfully")
+        } catch {
+            print("❌ Error changing password: \(error.localizedDescription)")
+            throw error
+        }
+    }
 }
