@@ -22,6 +22,12 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var selectedImage: UIImage?
     @State private var showImageCrop = false
+    @State private var currentOffset = CGSize.zero
+    @State private var finalOffset = CGSize.zero
+    @State private var scale: CGFloat = 1.0
+    @State private var finalScale: CGFloat = 1.0
+    @State private var rotation: Double = 0.0
+    @State private var finalRotation: Double = 0.0
     
     var body: some View {
         NavigationStack {
@@ -2286,6 +2292,8 @@ struct ImageCropView: View {
     @State private var finalOffset = CGSize.zero
     @State private var scale: CGFloat = 1.0
     @State private var finalScale: CGFloat = 1.0
+    @State private var rotation: Double = 0.0
+    @State private var finalRotation: Double = 0.0
     
     var body: some View {
         NavigationView {
@@ -2300,9 +2308,10 @@ struct ImageCropView: View {
                         .scaleEffect(scale)
                         .offset(x: finalOffset.width + currentOffset.width, 
                                y: finalOffset.height + currentOffset.height)
+                        .rotationEffect(.degrees(rotation + finalRotation))
                         .gesture(
+                            // Improved simultaneous gesture composition
                             SimultaneousGesture(
-                                // Pan gesture
                                 DragGesture()
                                     .onChanged { value in
                                         currentOffset = value.translation
@@ -2312,15 +2321,24 @@ struct ImageCropView: View {
                                         finalOffset.height += value.translation.height
                                         currentOffset = .zero
                                     },
-                                // Pinch gesture for zoom
-                                MagnificationGesture()
-                                    .onChanged { value in
-                                        scale = finalScale * value
-                                        scale = min(max(scale, 0.5), 3.0)
-                                    }
-                                    .onEnded { value in
-                                        finalScale = scale
-                                    }
+                                SimultaneousGesture(
+                                    MagnificationGesture()
+                                        .onChanged { value in
+                                            let newScale = finalScale * value
+                                            scale = min(max(newScale, 0.5), 3.0)
+                                        }
+                                        .onEnded { value in
+                                            finalScale = scale
+                                        },
+                                    RotationGesture()
+                                        .onChanged { value in
+                                            rotation = value.degrees
+                                        }
+                                        .onEnded { value in
+                                            finalRotation += value.degrees
+                                            rotation = 0.0
+                                        }
+                                )
                             )
                         )
                     
