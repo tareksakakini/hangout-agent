@@ -463,6 +463,8 @@ struct EmailVerificationView: View {
     @State private var isCheckingVerification = false
     @State private var isResendingEmail = false
     @State private var showSuccessMessage = false
+    @State private var showNotVerifiedMessage = false
+    @State private var emailResent = false
     
     var body: some View {
         ZStack {
@@ -520,11 +522,57 @@ struct EmailVerificationView: View {
                     .transition(.scale.combined(with: .opacity))
                 }
                 
+                // Not verified message
+                if showNotVerifiedMessage {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.orange)
+                            Text("Email not verified yet")
+                                .font(.headline)
+                                .foregroundColor(.orange)
+                        }
+                        
+                        VStack(spacing: 4) {
+                            Text("Please check your inbox (including spam/junk folder)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("and click the verification link, then try again.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(12)
+                    .transition(.scale.combined(with: .opacity))
+                }
+                
+                // Email resent confirmation
+                if emailResent {
+                    HStack {
+                        Image(systemName: "paperplane.circle.fill")
+                            .foregroundColor(.blue)
+                        Text("Verification email sent!")
+                            .font(.headline)
+                            .foregroundColor(.blue)
+                    }
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(12)
+                    .transition(.scale.combined(with: .opacity))
+                }
+                
                 // Action buttons
                 VStack(spacing: 16) {
                     Button(action: {
                         Task {
                             isCheckingVerification = true
+                            // Hide any previous messages
+                            showNotVerifiedMessage = false
+                            showSuccessMessage = false
+                            
                             await vm.checkEmailVerificationStatus()
                             
                             if vm.signedInUser?.isEmailVerified == true {
@@ -532,6 +580,14 @@ struct EmailVerificationView: View {
                                 // Brief delay to show success message before proceeding
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     // The UI will automatically update due to the state change
+                                }
+                            } else {
+                                // Show not verified message
+                                showNotVerifiedMessage = true
+                                
+                                // Auto-hide the message after a few seconds
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                                    showNotVerifiedMessage = false
                                 }
                             }
                             
@@ -561,11 +617,19 @@ struct EmailVerificationView: View {
                     Button(action: {
                         Task {
                             isResendingEmail = true
+                            // Hide previous messages
+                            emailResent = false
+                            showNotVerifiedMessage = false
+                            
                             let success = await vm.resendVerificationEmail()
                             isResendingEmail = false
                             
                             if success {
-                                // Show brief feedback
+                                emailResent = true
+                                // Auto-hide the confirmation after a few seconds
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                                    emailResent = false
+                                }
                             }
                         }
                     }) {
@@ -624,7 +688,6 @@ struct LoginView: View {
     @State var email: String = ""
     @State var password: String = ""
     @State var showWrongMessage: Bool = false
-    @State var goToNextScreen: Bool = false
     @State var isPasswordVisible = false
     @State var isVerified = false
     @State var wrongMessage: String = " "
@@ -724,7 +787,11 @@ extension LoginView {
         Button {
             Task {
                 vm.signedInUser = await vm.signinButtonPressed(email: email, password: password)
-                goToNextScreen = true
+                if vm.signedInUser != nil {
+                    // Successfully signed in - dismiss back to StartingView
+                    // which will handle routing to EmailVerificationView or HomeView
+                    dismiss()
+                }
             }
         } label: {
             Text("Sign In")
@@ -735,11 +802,6 @@ extension LoginView {
                 .foregroundColor(.white)
                 .cornerRadius(12)
                 .shadow(radius: 5)
-        }
-        .navigationDestination(isPresented: $goToNextScreen) {
-            if vm.signedInUser != nil {
-                HomeView()
-            }
         }
         .padding(.top, 8)
     }
