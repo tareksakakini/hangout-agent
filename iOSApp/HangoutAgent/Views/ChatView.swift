@@ -18,6 +18,8 @@ struct ChatView: View {
     @State private var showUploadResult = false
     @State private var imageRefreshId = UUID()
     @State private var isRemovingImage = false
+    @State private var showPhotoActionSheet = false
+    @State private var showPhotoPicker = false
     
     var body: some View {
         NavigationStack {
@@ -74,6 +76,16 @@ struct ChatView: View {
             textbox
         }
         .navigationTitle(chatbot.name)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showPhotoActionSheet = true
+                }) {
+                    Image(systemName: "camera.fill")
+                        .foregroundColor(.blue)
+                }
+            }
+        }
         .onDisappear {
             if let chat = chat {
                 vm.stopListeningToMessages(chatId: chat.id)
@@ -85,6 +97,53 @@ struct ChatView: View {
         .onChange(of: chat?.messages) { oldValue, newValue in
             logChatState()
         }
+        .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
+            // Force image refresh when profile URL changes
+            if oldValue != newValue && newValue != nil {
+                imageRefreshId = UUID()
+            }
+        }
+        .onChange(of: selectedPhotoItem) { oldValue, newValue in
+            Task {
+                if let photoItem = newValue {
+                    await uploadProfileImage(from: photoItem)
+                }
+            }
+        }
+        .confirmationDialog(
+            "Profile Picture",
+            isPresented: $showPhotoActionSheet,
+            titleVisibility: .visible
+        ) {
+            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                // User has a profile picture - show change and remove options
+                Button("Change Photo") {
+                    showPhotoPicker = true
+                }
+                
+                Button("Remove Photo", role: .destructive) {
+                    Task {
+                        await removeProfileImage()
+                    }
+                }
+                
+                Button("Cancel", role: .cancel) { }
+            } else {
+                // User has no profile picture - show add option
+                Button("Add Photo") {
+                    showPhotoPicker = true
+                }
+                
+                Button("Cancel", role: .cancel) { }
+            }
+        } message: {
+            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                Text("Choose an option for your profile picture")
+            } else {
+                Text("Add a profile picture to personalize your account")
+            }
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
     }
     
     private func logChatState() {
@@ -107,6 +166,81 @@ struct ChatView: View {
         if let lastMessage = chat?.messages.last {
             withAnimation {
                 proxy.scrollTo(lastMessage.id, anchor: .bottom)
+            }
+        }
+    }
+    
+    private func uploadProfileImage(from photoItem: PhotosPickerItem) async {
+        isUploadingImage = true
+        showUploadResult = false
+        
+        do {
+            // Convert PhotosPickerItem to UIImage
+            guard let imageData = try await photoItem.loadTransferable(type: Data.self),
+                  let uiImage = UIImage(data: imageData) else {
+                uploadResult = (false, "Failed to process image")
+                showUploadResult = true
+                isUploadingImage = false
+                return
+            }
+            
+            // Upload the image
+            let result = await vm.uploadProfileImage(uiImage)
+            
+            DispatchQueue.main.async {
+                self.isUploadingImage = false
+                self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
+                self.showUploadResult = true
+                
+                // Force image refresh on successful upload
+                if result.success {
+                    self.imageRefreshId = UUID()
+                }
+                
+                // Auto-hide the message after a few seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self.showUploadResult = false
+                }
+                
+                // Clear the selected photo item
+                self.selectedPhotoItem = nil
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isUploadingImage = false
+                self.uploadResult = (false, "Failed to load image")
+                self.showUploadResult = true
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self.showUploadResult = false
+                }
+                
+                self.selectedPhotoItem = nil
+            }
+        }
+    }
+    
+    private func removeProfileImage() async {
+        isRemovingImage = true
+        showUploadResult = false
+        
+        let result = await vm.removeProfileImage()
+        
+        DispatchQueue.main.async {
+            self.isRemovingImage = false
+            self.uploadResult = (result.success, result.success ? "Profile picture removed!" : result.errorMessage ?? "Failed to remove profile picture")
+            self.showUploadResult = true
+            
+            // Force image refresh on successful removal
+            if result.success {
+                self.imageRefreshId = UUID()
+                // Clear the selected photo item to ensure PhotosPicker works for next selection
+                self.selectedPhotoItem = nil
+            }
+            
+            // Auto-hide the message after a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showUploadResult = false
             }
         }
     }
@@ -869,11 +1003,13 @@ struct ProfileView: View {
     @State private var showDeleteResult = false
     @State private var showChangePassword = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showPhotoPicker = false
     @State private var isUploadingImage = false
     @State private var uploadResult: (success: Bool, message: String)? = nil
     @State private var showUploadResult = false
     @State private var imageRefreshId = UUID()
     @State private var isRemovingImage = false
+    @State private var showPhotoActionSheet = false
     
     var body: some View {
         ScrollView {
@@ -919,25 +1055,6 @@ struct ProfileView: View {
                                         }
                                     }
                                     .id(imageRefreshId)
-                                    .contextMenu {
-                                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                                            HStack {
-                                                Image(systemName: "camera.fill")
-                                                Text("Change Photo")
-                                            }
-                                        }
-                                        
-                                        Button(action: {
-                                            Task {
-                                                await removeProfileImage()
-                                            }
-                                        }) {
-                                            HStack {
-                                                Image(systemName: "trash")
-                                                Text("Remove Photo")
-                                            }
-                                        }
-                                    }
                                 } else {
                                     // Default avatar with initials
                                     Circle()
@@ -948,14 +1065,6 @@ struct ProfileView: View {
                                                 .font(.system(size: 32, weight: .medium, design: .rounded))
                                                 .foregroundColor(.white)
                                         )
-                                        .contextMenu {
-                                            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                                                HStack {
-                                                    Image(systemName: "camera.fill")
-                                                    Text("Add Photo")
-                                                }
-                                            }
-                                        }
                                 }
                                 
                                 // Edit button overlay
@@ -963,7 +1072,9 @@ struct ProfileView: View {
                                     .fill(Color.white)
                                     .frame(width: 28, height: 28)
                                     .overlay(
-                                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                        Button(action: {
+                                            showPhotoActionSheet = true
+                                        }) {
                                             Image(systemName: "camera.fill")
                                                 .font(.system(size: 14, weight: .medium))
                                                 .foregroundColor(.black.opacity(0.7))
@@ -1254,17 +1365,51 @@ struct ProfileView: View {
         } message: {
             Text("This action cannot be undone. Your account and all associated data will be permanently deleted.")
         }
+        .confirmationDialog(
+            "Profile Picture",
+            isPresented: $showPhotoActionSheet,
+            titleVisibility: .visible
+        ) {
+            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                // User has a profile picture - show change and remove options
+                Button("Change Photo") {
+                    showPhotoPicker = true
+                }
+                
+                Button("Remove Photo", role: .destructive) {
+                    Task {
+                        await removeProfileImage()
+                    }
+                }
+                
+                Button("Cancel", role: .cancel) { }
+            } else {
+                // User has no profile picture - show add option
+                Button("Add Photo") {
+                    showPhotoPicker = true
+                }
+                
+                Button("Cancel", role: .cancel) { }
+            }
+        } message: {
+            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                Text("Choose an option for your profile picture")
+            } else {
+                Text("Add a profile picture to personalize your account")
+            }
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
+            // Force image refresh when profile URL changes
+            if oldValue != newValue && newValue != nil {
+                imageRefreshId = UUID()
+            }
+        }
         .onChange(of: selectedPhotoItem) { oldValue, newValue in
             Task {
                 if let photoItem = newValue {
                     await uploadProfileImage(from: photoItem)
                 }
-            }
-        }
-        .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
-            // Force image refresh when profile URL changes
-            if oldValue != newValue && newValue != nil {
-                imageRefreshId = UUID()
             }
         }
     }
@@ -1333,6 +1478,8 @@ struct ProfileView: View {
             // Force image refresh on successful removal
             if result.success {
                 self.imageRefreshId = UUID()
+                // Clear the selected photo item to ensure PhotosPicker works for next selection
+                self.selectedPhotoItem = nil
             }
             
             // Auto-hide the message after a few seconds
