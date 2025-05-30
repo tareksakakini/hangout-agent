@@ -2288,72 +2288,82 @@ struct ImageCropView: View {
     let onCrop: (UIImage) -> Void
     let onCancel: () -> Void
     
-    @State private var currentOffset = CGSize.zero
-    @State private var finalOffset = CGSize.zero
+    @State private var offset = CGSize.zero
+    @State private var lastOffset = CGSize.zero
     @State private var scale: CGFloat = 1.0
-    @State private var finalScale: CGFloat = 1.0
-    @State private var rotation: Double = 0.0
-    @State private var finalRotation: Double = 0.0
+    @State private var lastScale: CGFloat = 1.0
+    
+    // Constants for better UX
+    private let cropCircleSize: CGFloat = 280
+    private let minScale: CGFloat = 0.5
+    private let maxScale: CGFloat = 4.0
     
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
                 ZStack {
+                    // Background
                     Color.black.ignoresSafeArea()
                     
-                    // Image
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .scaleEffect(scale)
-                        .offset(x: finalOffset.width + currentOffset.width, 
-                               y: finalOffset.height + currentOffset.height)
-                        .rotationEffect(.degrees(rotation + finalRotation))
-                        .gesture(
-                            // Improved simultaneous gesture composition
-                            SimultaneousGesture(
-                                DragGesture()
-                                    .onChanged { value in
-                                        currentOffset = value.translation
-                                    }
-                                    .onEnded { value in
-                                        finalOffset.width += value.translation.width
-                                        finalOffset.height += value.translation.height
-                                        currentOffset = .zero
-                                    },
+                    // Main image container
+                    ZStack {
+                        // The actual image
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .scaleEffect(scale)
+                            .offset(offset)
+                            .gesture(
                                 SimultaneousGesture(
+                                    // Pan gesture
+                                    DragGesture()
+                                        .onChanged { value in
+                                            let newOffset = CGSize(
+                                                width: lastOffset.width + value.translation.width,
+                                                height: lastOffset.height + value.translation.height
+                                            )
+                                            offset = constrainOffset(newOffset, in: geometry.size)
+                                        }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        },
+                                    
+                                    // Zoom gesture
                                     MagnificationGesture()
                                         .onChanged { value in
-                                            let newScale = finalScale * value
-                                            scale = min(max(newScale, 0.5), 3.0)
+                                            let newScale = lastScale * value
+                                            scale = min(max(newScale, minScale), maxScale)
+                                            
+                                            // Constrain offset when scaling
+                                            offset = constrainOffset(offset, in: geometry.size)
                                         }
-                                        .onEnded { value in
-                                            finalScale = scale
-                                        },
-                                    RotationGesture()
-                                        .onChanged { value in
-                                            rotation = value.degrees
-                                        }
-                                        .onEnded { value in
-                                            finalRotation += value.degrees
-                                            rotation = 0.0
+                                        .onEnded { _ in
+                                            lastScale = scale
+                                            lastOffset = offset
                                         }
                                 )
                             )
+                            .onAppear {
+                                setupInitialScale(in: geometry.size)
+                            }
+                        
+                        // Crop overlay with circular preview
+                        CircularCropOverlay(
+                            cropSize: cropCircleSize,
+                            screenSize: geometry.size
                         )
-                    
-                    // Crop overlay - with allowsHitTesting(false) to not block touches
-                    CropOverlayView(geometry: geometry)
                         .allowsHitTesting(false)
+                    }
                 }
             }
-            .navigationTitle("Crop Image")
+            .navigationTitle("Crop Profile Picture")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
                         onCancel()
                     }
+                    .foregroundColor(.white)
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -2361,112 +2371,227 @@ struct ImageCropView: View {
                         cropImage()
                     }
                     .fontWeight(.semibold)
+                    .foregroundColor(.white)
                 }
             }
+            .toolbarBackground(Color.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func setupInitialScale(in screenSize: CGSize) {
+        // Calculate the optimal initial scale to fit the image nicely in the crop circle
+        let imageSize = image.size
+        _ = imageSize.width / imageSize.height // Remove unused variable warning
+        
+        let fitWidth = cropCircleSize
+        let fitHeight = cropCircleSize
+        
+        let scaleToFitWidth = fitWidth / imageSize.width
+        let scaleToFitHeight = fitHeight / imageSize.height
+        
+        // Use the larger scale factor to ensure the image covers the crop area
+        let initialScale = max(scaleToFitWidth, scaleToFitHeight) * 1.1 // 10% larger for better coverage
+        
+        scale = min(max(initialScale, minScale), maxScale)
+        lastScale = scale
+    }
+    
+    private func constrainOffset(_ proposedOffset: CGSize, in screenSize: CGSize) -> CGSize {
+        // Calculate the actual displayed image size
+        let imageSize = image.size
+        let imageAspectRatio = imageSize.width / imageSize.height
+        
+        // Determine how the image is displayed (aspect fit)
+        let displayWidth: CGFloat
+        let displayHeight: CGFloat
+        
+        if imageAspectRatio > screenSize.width / screenSize.height {
+            // Image is wider relative to screen
+            displayWidth = screenSize.width
+            displayHeight = screenSize.width / imageAspectRatio
+        } else {
+            // Image is taller relative to screen
+            displayHeight = screenSize.height
+            displayWidth = screenSize.height * imageAspectRatio
+        }
+        
+        // Apply current scale
+        let scaledWidth = displayWidth * scale
+        let scaledHeight = displayHeight * scale
+        
+        // Calculate maximum allowed offset to keep crop area filled
+        let maxOffsetX = max(0, (scaledWidth - cropCircleSize) / 2)
+        let maxOffsetY = max(0, (scaledHeight - cropCircleSize) / 2)
+        
+        // Break down the complex calculation
+        let constrainedWidth = max(proposedOffset.width, -maxOffsetX)
+        let finalWidth = min(constrainedWidth, maxOffsetX)
+        
+        let constrainedHeight = max(proposedOffset.height, -maxOffsetY)
+        let finalHeight = min(constrainedHeight, maxOffsetY)
+        
+        return CGSize(width: finalWidth, height: finalHeight)
     }
     
     private func cropImage() {
-        // Calculate the crop area based on user's pan and zoom
-        let cropAreaSize: CGFloat = 300 // The size of our crop overlay
         let imageSize = image.size
+        let outputSize = CGSize(width: 400, height: 400) // Final circular image size
         
-        // Calculate the actual crop rectangle in the image's coordinate system
+        // Calculate the crop rectangle in image coordinates
         let imageAspectRatio = imageSize.width / imageSize.height
-        let displayImageSize: CGSize
         
-        // Determine how the image is displayed (fit aspect ratio)
+        // Determine the displayed image size (how it appears on screen)
+        let screenBounds = UIScreen.main.bounds
+        let displayWidth: CGFloat
+        let displayHeight: CGFloat
+        
         if imageAspectRatio > 1 {
-            // Landscape image
-            displayImageSize = CGSize(width: cropAreaSize * imageAspectRatio, height: cropAreaSize)
+            displayWidth = screenBounds.width
+            displayHeight = screenBounds.width / imageAspectRatio
         } else {
-            // Portrait image  
-            displayImageSize = CGSize(width: cropAreaSize, height: cropAreaSize / imageAspectRatio)
+            displayHeight = screenBounds.height
+            displayWidth = screenBounds.height * imageAspectRatio
         }
         
-        // Apply the scale factor
-        let scaledDisplaySize = CGSize(
-            width: displayImageSize.width * scale,
-            height: displayImageSize.height * scale
-        )
+        // Scale factor from display coordinates to image coordinates
+        let scaleToImage = max(imageSize.width / displayWidth, imageSize.height / displayHeight)
         
-        // Calculate the center point of the crop area
-        let cropCenterX = cropAreaSize / 2
-        let cropCenterY = cropAreaSize / 2
+        // Calculate the crop area in image coordinates
+        let cropSizeInImage = cropCircleSize * scaleToImage / scale
         
-        // Account for the user's pan offset
-        let totalOffsetX = finalOffset.width + currentOffset.width
-        let totalOffsetY = finalOffset.height + currentOffset.height
+        // Center of the crop area, accounting for user's pan
+        let cropCenterX = (imageSize.width / 2) - (offset.width * scaleToImage / scale)
+        let cropCenterY = (imageSize.height / 2) - (offset.height * scaleToImage / scale)
         
-        // Calculate the crop rectangle in the scaled image's coordinate system
+        // Define the crop rectangle
         let cropRect = CGRect(
-            x: (scaledDisplaySize.width / 2) - cropCenterX - totalOffsetX,
-            y: (scaledDisplaySize.height / 2) - cropCenterY - totalOffsetY,
-            width: cropAreaSize,
-            height: cropAreaSize
+            x: cropCenterX - cropSizeInImage / 2,
+            y: cropCenterY - cropSizeInImage / 2,
+            width: cropSizeInImage,
+            height: cropSizeInImage
         )
         
-        // Convert to original image coordinates
-        let scaleToOriginal = max(imageSize.width / scaledDisplaySize.width, imageSize.height / scaledDisplaySize.height)
-        let originalCropRect = CGRect(
-            x: cropRect.origin.x * scaleToOriginal,
-            y: cropRect.origin.y * scaleToOriginal,
-            width: cropRect.width * scaleToOriginal,
-            height: cropRect.height * scaleToOriginal
-        )
-        
-        // Ensure the crop rect is within image bounds
+        // Ensure crop rect is within image bounds
         let clampedCropRect = CGRect(
-            x: max(0, min(originalCropRect.origin.x, imageSize.width - originalCropRect.width)),
-            y: max(0, min(originalCropRect.origin.y, imageSize.height - originalCropRect.height)),
-            width: min(originalCropRect.width, imageSize.width),
-            height: min(originalCropRect.height, imageSize.height)
+            x: max(0, min(cropRect.origin.x, imageSize.width - cropRect.width)),
+            y: max(0, min(cropRect.origin.y, imageSize.height - cropRect.height)),
+            width: min(cropRect.width, imageSize.width),
+            height: min(cropRect.height, imageSize.height)
         )
         
-        // Perform the actual crop
+        // Perform the crop
         guard let cgImage = image.cgImage?.cropping(to: clampedCropRect) else {
-            // Fallback to resizing if cropping fails
-            let resizedImage = resizeImage(image, to: CGSize(width: 400, height: 400))
-            onCrop(resizedImage)
+            // Fallback
+            let fallbackImage = resizeImageToCircle(image, to: outputSize)
+            onCrop(fallbackImage)
             return
         }
         
-        let croppedUIImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        let croppedImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+        let finalImage = resizeImageToCircle(croppedImage, to: outputSize)
         
-        // Resize the cropped image to final size
-        let finalImage = resizeImage(croppedUIImage, to: CGSize(width: 400, height: 400))
         onCrop(finalImage)
     }
     
-    private func resizeImage(_ image: UIImage, to size: CGSize) -> UIImage {
+    private func resizeImageToCircle(_ image: UIImage, to size: CGSize) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
+        return renderer.image { context in
+            let rect = CGRect(origin: .zero, size: size)
+            
+            // Create circular clipping path
+            context.cgContext.addEllipse(in: rect)
+            context.cgContext.clip()
+            
+            // Draw the image
+            image.draw(in: rect)
         }
     }
 }
 
-struct CropOverlayView: View {
-    let geometry: GeometryProxy
+struct CircularCropOverlay: View {
+    let cropSize: CGFloat
+    let screenSize: CGSize
     
-    var body: some View {
+    private var darkOverlayWithCutout: some View {
         ZStack {
-            // Semi-transparent overlay
-            Color.black.opacity(0.5)
+            // Dark overlay covering the entire screen
+            Color.black.opacity(0.6)
             
-            // Crop area (clear rectangle in the center)
-            Rectangle()
-                .frame(width: min(geometry.size.width - 40, 300), 
-                      height: min(geometry.size.width - 40, 300))
+            // Clear circle for the crop area
+            Circle()
+                .frame(width: cropSize, height: cropSize)
                 .blendMode(.destinationOut)
         }
         .compositingGroup()
-        .overlay(
-            // Crop border
-            Rectangle()
-                .stroke(Color.white, lineWidth: 2)
-                .frame(width: min(geometry.size.width - 40, 300), 
-                      height: min(geometry.size.width - 40, 300))
-        )
+    }
+    
+    private var borderElements: some View {
+        ZStack {
+            // Outer border
+            Circle()
+                .stroke(Color.white.opacity(0.8), lineWidth: 3)
+                .frame(width: cropSize, height: cropSize)
+            
+            // Inner subtle shadow for depth
+            Circle()
+                .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                .frame(width: cropSize - 6, height: cropSize - 6)
+            
+            // Corner indicators for better visual guidance
+            cornerIndicators
+        }
+    }
+    
+    private var cornerIndicators: some View {
+        let positions = [
+            CGPoint(x: cropSize / 2 + 10, y: 0),
+            CGPoint(x: 0, y: cropSize / 2 + 10),
+            CGPoint(x: -(cropSize / 2 + 10), y: 0),
+            CGPoint(x: 0, y: -(cropSize / 2 + 10))
+        ]
+        
+        return ForEach(Array(positions.enumerated()), id: \.offset) { index, position in
+            Circle()
+                .fill(Color.white)
+                .frame(width: 8, height: 8)
+                .offset(x: position.x, y: position.y)
+                .opacity(0.7)
+        }
+    }
+    
+    private var instructionText: some View {
+        VStack {
+            Spacer()
+            
+            HStack(spacing: 20) {
+                VStack(spacing: 4) {
+                    Image(systemName: "hand.draw")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("Pan")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                
+                VStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("Pinch to Zoom")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+            .padding(.bottom, 50)
+        }
+    }
+    
+    var body: some View {
+        darkOverlayWithCutout
+            .overlay(borderElements)
+            .overlay(instructionText)
     }
 }
