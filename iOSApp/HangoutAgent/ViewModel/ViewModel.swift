@@ -201,19 +201,38 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func deleteAccountButtonPressed() async {
-        guard let user = signedInUser else { return }
+    func deleteAccountButtonPressed() async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else { 
+            return (false, "No user signed in")
+        }
         
         do {
+            // Step 1: Delete Firebase Auth account first (most likely to fail)
+            try await AuthManager.shared.deleteUserAuth()
+            
+            // Step 2: Only delete user data if Auth deletion succeeded
             let firestoreService = DatabaseManager()
             try await firestoreService.deleteUserFromFirestore(uid: user.id)
-            try await AuthManager.shared.deleteUserAuth()
             
             DispatchQueue.main.async {
                 self.signedInUser = nil
             }
+            
+            return (true, nil)
         } catch {
             print("Error deleting account: \(error)")
+            
+            // Provide user-friendly error messages
+            let errorMessage: String
+            if error.localizedDescription.contains("requires-recent-login") {
+                errorMessage = "For security reasons, please sign out and sign back in, then try deleting your account again."
+            } else if error.localizedDescription.contains("network") || error.localizedDescription.contains("internet") {
+                errorMessage = "Network error. Please check your internet connection and try again."
+            } else {
+                errorMessage = "Account deletion failed. Please try again or contact support if the problem persists."
+            }
+            
+            return (false, errorMessage)
         }
     }
     
@@ -653,6 +672,30 @@ class ViewModel: ObservableObject {
         } catch {
             print("❌ Error sending verification email: \(error)")
             return false
+        }
+    }
+    
+    // Send password reset email
+    func sendPasswordResetEmail(email: String) async -> (success: Bool, errorMessage: String?) {
+        do {
+            try await AuthManager.shared.sendPasswordResetEmail(email: email)
+            return (true, nil)
+        } catch {
+            print("❌ Error sending password reset email: \(error)")
+            
+            // Provide user-friendly error messages
+            let errorMessage: String
+            if error.localizedDescription.contains("user-not-found") {
+                errorMessage = "No account found with this email address."
+            } else if error.localizedDescription.contains("invalid-email") {
+                errorMessage = "Please enter a valid email address."
+            } else if error.localizedDescription.contains("network") || error.localizedDescription.contains("internet") {
+                errorMessage = "Network error. Please check your internet connection and try again."
+            } else {
+                errorMessage = "Failed to send password reset email. Please try again."
+            }
+            
+            return (false, errorMessage)
         }
     }
 }

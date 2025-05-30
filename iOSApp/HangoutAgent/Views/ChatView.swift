@@ -691,6 +691,7 @@ struct LoginView: View {
     @State var isPasswordVisible = false
     @State var isVerified = false
     @State var wrongMessage: String = " "
+    @State var showForgotPassword = false
     
     var body: some View {
         ZStack {
@@ -713,9 +714,21 @@ struct LoginView: View {
                 
                 LoginSheet
                 
+                // Forgot Password Button
+                Button("Forgot Password?") {
+                    showForgotPassword = true
+                }
+                .font(.subheadline)
+                .foregroundColor(.blue)
+                .padding(.top, 10)
+                
                 Spacer()
             }
             .padding()
+        }
+        .sheet(isPresented: $showForgotPassword) {
+            ForgotPasswordView()
+                .environmentObject(vm)
         }
     }
 }
@@ -842,9 +855,38 @@ struct ProfileView: View {
     @EnvironmentObject private var vm: ViewModel
     @Environment(\.dismiss) private var dismiss
     
+    @State private var showDeleteConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteResult: (success: Bool, message: String)? = nil
+    @State private var showDeleteResult = false
+    
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
+            
+            // Account deletion result message
+            if showDeleteResult, let result = deleteResult {
+                VStack(spacing: 8) {
+                    HStack {
+                        Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(result.success ? .green : .red)
+                        Text(result.success ? "Account Deleted Successfully" : "Account Deletion Failed")
+                            .font(.headline)
+                            .foregroundColor(result.success ? .green : .red)
+                    }
+                    
+                    Text(result.message)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .padding()
+                .background((result.success ? Color.green : Color.red).opacity(0.1))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .transition(.scale.combined(with: .opacity))
+            }
             
             Button(action: {
                 Task {
@@ -863,24 +905,75 @@ struct ProfileView: View {
             .padding(.horizontal)
             
             Button(action: {
-                Task {
-                    await vm.deleteAccountButtonPressed()
-                    dismiss()
-                }
+                showDeleteConfirmation = true
             }) {
-                Text("Delete Account")
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.red)
-                    .cornerRadius(12)
+                HStack {
+                    if isDeletingAccount {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "trash")
+                    }
+                    Text(isDeletingAccount ? "Deleting Account..." : "Delete Account")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(isDeletingAccount ? Color.gray : Color.red)
+                .cornerRadius(12)
             }
+            .disabled(isDeletingAccount)
             .padding(.horizontal)
+            .confirmationDialog(
+                "Delete Account",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Account", role: .destructive) {
+                    Task {
+                        isDeletingAccount = true
+                        hideDeleteResult() // Hide any previous result
+                        
+                        let result = await vm.deleteAccountButtonPressed()
+                        
+                        isDeletingAccount = false
+                        
+                        if result.success {
+                            deleteResult = (true, "Your account has been permanently deleted.")
+                            showDeleteResult = true
+                            
+                            // Auto-dismiss after success
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                dismiss()
+                            }
+                        } else {
+                            deleteResult = (false, result.errorMessage ?? "Unknown error occurred")
+                            showDeleteResult = true
+                            
+                            // Auto-hide error message after 8 seconds
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+                                hideDeleteResult()
+                            }
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This action cannot be undone. Your account and all associated data will be permanently deleted.")
+            }
             
             Spacer()
         }
         .navigationTitle("Profile")
+    }
+    
+    private func hideDeleteResult() {
+        withAnimation {
+            showDeleteResult = false
+            deleteResult = nil
+        }
     }
 }
 
@@ -1263,5 +1356,151 @@ struct EventCardView: View {
         let displayFormatter = DateFormatter()
         displayFormatter.dateFormat = "EEEE, MMM d, yyyy"
         return displayFormatter.string(from: date)
+    }
+}
+
+struct ForgotPasswordView: View {
+    @EnvironmentObject private var vm: ViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var email: String = ""
+    @State private var isLoading = false
+    @State private var showResult = false
+    @State private var resultMessage = ""
+    @State private var isSuccess = false
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(.systemGray6)
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 30) {
+                    Spacer()
+                    
+                    // Icon
+                    Image(systemName: "key.circle.fill")
+                        .font(.system(size: 80))
+                        .foregroundColor(.blue)
+                        .padding(.bottom, 10)
+                    
+                    // Title
+                    Text("Reset Password")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(.primary)
+                    
+                    // Instructions
+                    Text("Enter your email address and we'll send you a link to reset your password.")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                    
+                    // Result message
+                    if showResult {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundColor(isSuccess ? .green : .red)
+                                Text(isSuccess ? "Reset Email Sent!" : "Reset Failed")
+                                    .font(.headline)
+                                    .foregroundColor(isSuccess ? .green : .red)
+                            }
+                            
+                            Text(resultMessage)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        .padding()
+                        .background((isSuccess ? Color.green : Color.red).opacity(0.1))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                    
+                    // Email input and button
+                    VStack(spacing: 16) {
+                        TextField("Email Address", text: $email)
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(12)
+                            .textInputAutocapitalization(.never)
+                            .disableAutocorrection(true)
+                            .keyboardType(.emailAddress)
+                            .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+                        
+                        Button(action: {
+                            Task {
+                                await sendPasswordReset()
+                            }
+                        }) {
+                            HStack {
+                                if isLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "paperplane.fill")
+                                }
+                                Text(isLoading ? "Sending..." : "Send Reset Email")
+                            }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(email.isEmpty || isLoading ? Color.gray : Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                            .shadow(radius: 5)
+                        }
+                        .disabled(email.isEmpty || isLoading)
+                    }
+                    .padding(.horizontal, 40)
+                    
+                    Spacer()
+                }
+                .padding()
+            }
+            .navigationTitle("Reset Password")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func sendPasswordReset() async {
+        isLoading = true
+        showResult = false
+        
+        let result = await vm.sendPasswordResetEmail(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
+        
+        isLoading = false
+        isSuccess = result.success
+        
+        if result.success {
+            resultMessage = "Check your inbox for password reset instructions. Don't forget to check your spam folder!"
+        } else {
+            resultMessage = result.errorMessage ?? "Failed to send reset email"
+        }
+        
+        showResult = true
+        
+        // Auto-hide result message after some time
+        DispatchQueue.main.asyncAfter(deadline: .now() + (result.success ? 5.0 : 8.0)) {
+            showResult = false
+            
+            // If successful, auto-dismiss the sheet after showing success message
+            if result.success {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    dismiss()
+                }
+            }
+        }
     }
 }

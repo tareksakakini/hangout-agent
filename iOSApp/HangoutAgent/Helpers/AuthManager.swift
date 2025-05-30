@@ -77,4 +77,15 @@ class AuthManager {
     func getCurrentUser() -> FirebaseAuth.User? {
         return Auth.auth().currentUser
     }
+    
+    // Send password reset email
+    func sendPasswordResetEmail(email: String) async throws {
+        do {
+            try await Auth.auth().sendPasswordReset(withEmail: email)
+            print("📧 Password reset email sent to: \(email)")
+        } catch {
+            print("❌ Error sending password reset email: \(error.localizedDescription)")
+            throw error
+        }
+    }
 }
