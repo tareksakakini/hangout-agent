@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ChatView: View {
     @EnvironmentObject private var vm: ViewModel
@@ -10,6 +11,13 @@ struct ChatView: View {
     }
     
     @State var messageText: String = ""
+    
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var isUploadingImage = false
+    @State private var uploadResult: (success: Bool, message: String)? = nil
+    @State private var showUploadResult = false
+    @State private var imageRefreshId = UUID()
+    @State private var isRemovingImage = false
     
     var body: some View {
         NavigationStack {
@@ -860,23 +868,158 @@ struct ProfileView: View {
     @State private var deleteResult: (success: Bool, message: String)? = nil
     @State private var showDeleteResult = false
     @State private var showChangePassword = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var isUploadingImage = false
+    @State private var uploadResult: (success: Bool, message: String)? = nil
+    @State private var showUploadResult = false
+    @State private var imageRefreshId = UUID()
+    @State private var isRemovingImage = false
     
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 // User Info Section
                 if let user = vm.signedInUser {
-                    VStack(spacing: 20) {
-                        // Profile Avatar - Clean minimal design
-                        Circle()
-                            .fill(Color.black)
-                            .frame(width: 90, height: 90)
-                            .overlay(
-                                Text(user.fullname.prefix(1))
-                                    .font(.system(size: 32, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white)
-                            )
+        VStack(spacing: 20) {
+                        // Profile Avatar with Edit Functionality
+                        VStack(spacing: 12) {
+                            ZStack {
+                                if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                                    // Show actual profile image
+                                    AsyncImage(url: URL(string: profileImageUrl)) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            // Loading state
+                                            Circle()
+                                                .fill(Color.black.opacity(0.1))
+                                                .frame(width: 90, height: 90)
+                                                .overlay(
+                                                    ProgressView()
+                                                        .tint(.black.opacity(0.6))
+                                                )
+                                        case .success(let image):
+                                            // Successfully loaded image
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 90, height: 90)
+                                                .clipShape(Circle())
+                                        case .failure(_):
+                                            // Failed to load - show fallback
+                                            Circle()
+                                                .fill(Color.black)
+                                                .frame(width: 90, height: 90)
+                                                .overlay(
+                                                    Text(user.fullname.prefix(1))
+                                                        .font(.system(size: 32, weight: .medium, design: .rounded))
+                                                        .foregroundColor(.white)
+                                                )
+                                        @unknown default:
+                                            EmptyView()
+                                        }
+                                    }
+                                    .id(imageRefreshId)
+                                    .contextMenu {
+                                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                            HStack {
+                                                Image(systemName: "camera.fill")
+                                                Text("Change Photo")
+                                            }
+                                        }
+                                        
+                                        Button(action: {
+                                            Task {
+                                                await removeProfileImage()
+                                            }
+                                        }) {
+                                            HStack {
+                                                Image(systemName: "trash")
+                                                Text("Remove Photo")
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Default avatar with initials
+                                    Circle()
+                                        .fill(Color.black)
+                                        .frame(width: 90, height: 90)
+                                        .overlay(
+                                            Text(user.fullname.prefix(1))
+                                                .font(.system(size: 32, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white)
+                                        )
+                                        .contextMenu {
+                                            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                                HStack {
+                                                    Image(systemName: "camera.fill")
+                                                    Text("Add Photo")
+                                                }
+                                            }
+                                        }
+                                }
+                                
+                                // Edit button overlay
+                                Circle()
+                                    .fill(Color.white)
+                                    .frame(width: 28, height: 28)
+                                    .overlay(
+                                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                            Image(systemName: "camera.fill")
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundColor(.black.opacity(0.7))
+                                        }
+                                    )
+                                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                                    .offset(x: 30, y: 30)
+                            }
                             .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                            
+                            // Upload/Remove status
+                            if isUploadingImage {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(.black.opacity(0.6))
+                                    Text("Uploading...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.6))
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.05))
+                                .cornerRadius(16)
+                            } else if isRemovingImage {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(.black.opacity(0.6))
+                                    Text("Removing...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.6))
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.05))
+                                .cornerRadius(16)
+                            }
+                            
+                            // Upload/Remove result message
+                            if showUploadResult, let result = uploadResult {
+                                HStack(spacing: 6) {
+                                    Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(result.success ? .black.opacity(0.6) : .black.opacity(0.7))
+                                    Text(result.message)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.05))
+                                .cornerRadius(16)
+                                .transition(.scale.combined(with: .opacity))
+                            }
+                        }
                         
                         // User Info Card - Clean minimal design
                         VStack(spacing: 24) {
@@ -907,7 +1050,7 @@ struct ProfileView: View {
                                             .foregroundColor(.primary)
                                     }
                                     
-                                    Spacer()
+            Spacer()
                                 }
                                 
                                 // Subtle divider
@@ -1020,16 +1163,16 @@ struct ProfileView: View {
                     }
                     
                     // Sign Out Button
-                    Button(action: {
-                        Task {
-                            await vm.signoutButtonPressed()
-                        }
-                    }) {
+            Button(action: {
+                Task {
+                    await vm.signoutButtonPressed()
+                }
+            }) {
                         HStack(spacing: 12) {
                             Image(systemName: "arrow.right.square")
                                 .font(.system(size: 18, weight: .medium))
                                 .foregroundColor(.black.opacity(0.7))
-                            Text("Sign Out")
+                Text("Sign Out")
                                 .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.primary)
                             Spacer()
@@ -1044,7 +1187,7 @@ struct ProfileView: View {
                     }
                     
                     // Delete Account Button - Subtle design
-                    Button(action: {
+            Button(action: {
                         showDeleteConfirmation = true
                     }) {
                         HStack(spacing: 12) {
@@ -1110,6 +1253,92 @@ struct ProfileView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This action cannot be undone. Your account and all associated data will be permanently deleted.")
+        }
+        .onChange(of: selectedPhotoItem) { oldValue, newValue in
+            Task {
+                if let photoItem = newValue {
+                    await uploadProfileImage(from: photoItem)
+                }
+            }
+        }
+        .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
+            // Force image refresh when profile URL changes
+            if oldValue != newValue && newValue != nil {
+                imageRefreshId = UUID()
+            }
+        }
+    }
+    
+    private func uploadProfileImage(from photoItem: PhotosPickerItem) async {
+        isUploadingImage = true
+        showUploadResult = false
+        
+        do {
+            // Convert PhotosPickerItem to UIImage
+            guard let imageData = try await photoItem.loadTransferable(type: Data.self),
+                  let uiImage = UIImage(data: imageData) else {
+                uploadResult = (false, "Failed to process image")
+                showUploadResult = true
+                isUploadingImage = false
+                return
+            }
+            
+            // Upload the image
+            let result = await vm.uploadProfileImage(uiImage)
+            
+            DispatchQueue.main.async {
+                self.isUploadingImage = false
+                self.uploadResult = (result.success, result.success ? "Profile picture updated!" : result.errorMessage ?? "Upload failed")
+                self.showUploadResult = true
+                
+                // Force image refresh on successful upload
+                if result.success {
+                    self.imageRefreshId = UUID()
+                }
+                
+                // Auto-hide the message after a few seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self.showUploadResult = false
+                }
+                
+                // Clear the selected photo item
+                self.selectedPhotoItem = nil
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isUploadingImage = false
+                self.uploadResult = (false, "Failed to load image")
+                self.showUploadResult = true
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self.showUploadResult = false
+                }
+                
+                self.selectedPhotoItem = nil
+            }
+        }
+    }
+    
+    private func removeProfileImage() async {
+        isRemovingImage = true
+        showUploadResult = false
+        
+        let result = await vm.removeProfileImage()
+        
+        DispatchQueue.main.async {
+            self.isRemovingImage = false
+            self.uploadResult = (result.success, result.success ? "Profile picture removed!" : result.errorMessage ?? "Failed to remove profile picture")
+            self.showUploadResult = true
+            
+            // Force image refresh on successful removal
+            if result.success {
+                self.imageRefreshId = UUID()
+            }
+            
+            // Auto-hide the message after a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showUploadResult = false
+            }
         }
     }
 }
@@ -1276,7 +1505,7 @@ struct ChangePasswordView: View {
                                 .font(.system(size: 14))
                         }
                         Text(isLoading ? "Updating..." : "Update Password")
-                            .font(.headline)
+                    .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -1288,9 +1517,9 @@ struct ChangePasswordView: View {
                 .disabled(!canChangePassword || isLoading)
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
-                
-                Spacer()
-            }
+            
+            Spacer()
+        }
             .background(Color(.systemGray6).ignoresSafeArea())
             .navigationTitle("Change Password")
             .navigationBarTitleDisplayMode(.inline)
@@ -1503,7 +1732,7 @@ extension SignupView {
                         
                         // Auto-dismiss after 2 seconds
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            dismiss()
+                        dismiss()
                         }
                     }
                 }
@@ -1534,7 +1763,7 @@ struct StartingView: View {
                 // User is signed in -> check verification status
                 if user.isEmailVerified {
                     // Verified user -> go to HomeView
-                    HomeView()
+                HomeView()
                 } else {
                     // Unverified user -> go to EmailVerificationView
                     EmailVerificationView()

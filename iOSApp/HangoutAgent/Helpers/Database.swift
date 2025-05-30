@@ -388,4 +388,18 @@ class DatabaseManager {
             throw error
         }
     }
+    
+    func updateUserProfileImage(uid: String, imageUrl: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "profileImageUrl": imageUrl
+            ])
+            print("✅ Profile image URL updated successfully!")
+        } catch {
+            print("❌ Error updating profile image URL: \(error.localizedDescription)")
+            throw error
+        }
+    }
 }

@@ -7,6 +7,8 @@
 
 import Foundation
 import FirebaseFirestore
+import UIKit
+import FirebaseStorage
 
 @MainActor
 class ViewModel: ObservableObject {
@@ -722,6 +724,80 @@ class ViewModel: ObservableObject {
             }
             
             return (false, errorMessage)
+        }
+    }
+    
+    // MARK: - Profile Picture Functions
+    
+    func uploadProfileImage(_ image: UIImage) async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        do {
+            // Convert image to data
+            guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+                return (false, "Failed to process image")
+            }
+            
+            // Create a unique filename
+            let fileName = "profile_\(user.id)_\(UUID().uuidString).jpg"
+            
+            // Get Firebase Storage reference
+            let storage = Storage.storage()
+            let storageRef = storage.reference()
+            let profileImagesRef = storageRef.child("profile_images/\(fileName)")
+            
+            // Upload image data to Firebase Storage
+            print("📤 Uploading profile image to Firebase Storage...")
+            let metadata = StorageMetadata()
+            metadata.contentType = "image/jpeg"
+            
+            let uploadResult = try await profileImagesRef.putDataAsync(imageData, metadata: metadata)
+            print("✅ Upload completed successfully")
+            
+            // Get the download URL
+            let downloadURL = try await profileImagesRef.downloadURL()
+            let imageUrl = downloadURL.absoluteString
+            print("📥 Download URL obtained: \(imageUrl)")
+            
+            // Update user's profile image URL in Firestore
+            let firestoreService = DatabaseManager()
+            try await firestoreService.updateUserProfileImage(uid: user.id, imageUrl: imageUrl)
+            
+            // Update local user object
+            DispatchQueue.main.async {
+                self.signedInUser?.profileImageUrl = imageUrl
+            }
+            
+            print("✅ Profile image uploaded and updated successfully!")
+            return (true, nil)
+        } catch {
+            print("❌ Error uploading profile image: \(error)")
+            return (false, "Failed to upload image: \(error.localizedDescription)")
+        }
+    }
+    
+    func removeProfileImage() async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        do {
+            // Update user's profile image URL to empty string in Firestore
+            let firestoreService = DatabaseManager()
+            try await firestoreService.updateUserProfileImage(uid: user.id, imageUrl: "")
+            
+            // Update local user object
+            DispatchQueue.main.async {
+                self.signedInUser?.profileImageUrl = ""
+            }
+            
+            print("✅ Profile image removed successfully!")
+            return (true, nil)
+        } catch {
+            print("❌ Error removing profile image: \(error)")
+            return (false, "Failed to remove image: \(error.localizedDescription)")
         }
     }
 }
