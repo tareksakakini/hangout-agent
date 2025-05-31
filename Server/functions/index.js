@@ -651,7 +651,7 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('01 14 * * 3')
+  .schedule('08 15 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
@@ -663,7 +663,7 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('04 14 * * 3')
+  .schedule('11 15 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
@@ -675,7 +675,7 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('07 14 * * 3')
+  .schedule('14 15 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
