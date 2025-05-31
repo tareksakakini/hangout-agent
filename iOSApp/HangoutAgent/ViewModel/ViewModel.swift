@@ -49,12 +49,12 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func signupButtonPressed(fullname: String, username: String, email: String, password: String) async -> User? {
+    func signupButtonPressed(fullname: String, username: String, email: String, password: String, homeCity: String? = nil) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
             let firestoreService = DatabaseManager()
-            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email)
-            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false)
+            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity)
+            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity)
             print("📧 Account created successfully! Please check your email to verify your account.")
             return user
         } catch {
@@ -833,6 +833,27 @@ class ViewModel: ObservableObject {
         } catch {
             print("❌ Error removing profile image: \(error)")
             return (false, "Failed to remove image: \(error.localizedDescription)")
+        }
+    }
+    
+    func updateHomeCity(city: String) async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            try await firestoreService.updateHomeCity(uid: user.id, homeCity: city)
+            
+            // Update local user object
+            DispatchQueue.main.async {
+                self.signedInUser?.homeCity = city
+            }
+            
+            return (true, nil)
+        } catch {
+            print("Error updating home city: \(error)")
+            return (false, error.localizedDescription)
         }
     }
 }

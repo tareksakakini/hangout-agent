@@ -871,7 +871,12 @@ struct ProfileView: View {
     @State private var showPhotoActionSheet = false
     @State private var selectedImage: UIImage?
     @State private var showImageCrop = false
-    
+    @State private var isEditingHomeCity = false
+    @State private var editedHomeCity = ""
+    @State private var isUpdatingHomeCity = false
+    @State private var homeCityUpdateResult: (success: Bool, message: String)? = nil
+    @State private var showHomeCityUpdateResult = false
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -1083,6 +1088,84 @@ struct ProfileView: View {
                                         .cornerRadius(12)
                                     }
                                 }
+                                
+                                // Subtle divider
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.05))
+                                    .frame(height: 1)
+                                
+                                // Home City row
+                                HStack(spacing: 16) {
+                                    Circle()
+                                        .fill(Color.black.opacity(0.05))
+                                        .frame(width: 40, height: 40)
+                                        .overlay(
+                                            Image(systemName: "location.circle")
+                                                .font(.system(size: 18, weight: .medium))
+                                                .foregroundColor(.black.opacity(0.7))
+                                        )
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Home City")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.black.opacity(0.5))
+                                            .textCase(.uppercase)
+                                            .tracking(0.5)
+                                        
+                                        if isEditingHomeCity {
+                                            HStack(spacing: 8) {
+                                                TextField("Enter your city", text: $editedHomeCity)
+                                                    .font(.system(size: 16, weight: .medium))
+                                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                                    .textInputAutocapitalization(.words)
+                                                    .disableAutocorrection(true)
+                                                
+                                                if isUpdatingHomeCity {
+                                                    ProgressView()
+                                                        .scaleEffect(0.7)
+                                                        .tint(.black.opacity(0.6))
+                                                } else {
+                                                    HStack(spacing: 4) {
+                                                        Button("Save") {
+                                                            Task {
+                                                                await updateHomeCity()
+                                                            }
+                                                        }
+                                                        .font(.system(size: 12, weight: .medium))
+                                                        .foregroundColor(.blue)
+                                                        .disabled(editedHomeCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                                        
+                                                        Button("Cancel") {
+                                                            isEditingHomeCity = false
+                                                            editedHomeCity = user.homeCity ?? ""
+                                                        }
+                                                        .font(.system(size: 12, weight: .medium))
+                                                        .foregroundColor(.gray)
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Text(user.homeCity?.isEmpty == false ? user.homeCity! : "Not set")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(user.homeCity?.isEmpty == false ? .primary : .black.opacity(0.4))
+                                        }
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    if !isEditingHomeCity {
+                                        Button("Edit") {
+                                            editedHomeCity = user.homeCity ?? ""
+                                            isEditingHomeCity = true
+                                        }
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.blue.opacity(0.1))
+                                        .cornerRadius(8)
+                                    }
+                                }
                             }
                         }
                         .padding(28)
@@ -1092,6 +1175,22 @@ struct ProfileView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
+                }
+                
+                // Home city update result message
+                if showHomeCityUpdateResult, let result = homeCityUpdateResult {
+                    HStack {
+                        Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(result.success ? .black.opacity(0.7) : .black.opacity(0.7))
+                        Text(result.message)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.primary)
+                    }
+                    .padding()
+                    .background(Color.black.opacity(0.05))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                    .transition(.scale.combined(with: .opacity))
                 }
                 
                 // Account deletion result message
@@ -1362,6 +1461,28 @@ struct ProfileView: View {
             }
         }
     }
+    
+    private func updateHomeCity() async {
+        isUpdatingHomeCity = true
+        showHomeCityUpdateResult = false
+        
+        let result = await vm.updateHomeCity(city: editedHomeCity.trimmingCharacters(in: .whitespacesAndNewlines))
+        
+        DispatchQueue.main.async {
+            self.isUpdatingHomeCity = false
+            self.homeCityUpdateResult = (result.success, result.success ? "Home city updated successfully!" : result.errorMessage ?? "Failed to update home city")
+            self.showHomeCityUpdateResult = true
+            
+            if result.success {
+                self.isEditingHomeCity = false
+            }
+            
+            // Auto-hide the message after a few seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showHomeCityUpdateResult = false
+            }
+        }
+    }
 }
 
 struct ChangePasswordView: View {
@@ -1601,6 +1722,7 @@ struct SignupView: View {
     @State var username: String = ""
     @State var email: String = ""
     @State var password: String = ""
+    @State var homeCity: String = ""
     @State var goToNextScreen: Bool = false
     @State var isPasswordVisible = false
     @State var user: User? = nil
@@ -1687,6 +1809,7 @@ extension SignupView {
             FullnameField
             UsernameField
             EmailField
+            HomeCityField
             PasswordField
         }
     }
@@ -1718,6 +1841,15 @@ extension SignupView {
             .disableAutocorrection(true)
     }
     
+    private var HomeCityField: some View {
+        TextField("Home City", text: $homeCity)
+            .padding()
+            .background(Color(.systemGray5))
+            .cornerRadius(10)
+            .textInputAutocapitalization(.words)
+            .disableAutocorrection(true)
+    }
+    
     private var PasswordField: some View {
         HStack {
             SwiftUI.Group {
@@ -1746,7 +1878,7 @@ extension SignupView {
     private var SignUpButton: some View {
         Button {
             Task {
-                if let signedUpUser = await vm.signupButtonPressed(fullname: fullname, username: username, email: email, password: password) {
+                if let signedUpUser = await vm.signupButtonPressed(fullname: fullname, username: username, email: email, password: password, homeCity: homeCity) {
                     DispatchQueue.main.async {
                         vm.signedInUser = signedUpUser
                         showSuccessMessage = true
@@ -1770,7 +1902,6 @@ extension SignupView {
         }
         .padding(.top, 8)
     }
-    
 }
 
 struct StartingView: View {

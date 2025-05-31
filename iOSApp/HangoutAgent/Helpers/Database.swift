@@ -14,10 +14,10 @@ class DatabaseManager {
     
     // MARK: - Add Functions
     
-    func addUserToFirestore(uid: String, fullname: String, username: String, email: String) async throws {
+    func addUserToFirestore(uid: String, fullname: String, username: String, email: String, homeCity: String? = nil) async throws {
         let userRef = db.collection("users").document(uid)
         
-        let userData: [String: Any] = [
+        var userData: [String: Any] = [
             "uid": uid,
             "fullname": fullname,
             "username": username,
@@ -25,6 +25,11 @@ class DatabaseManager {
             "subscriptions": [],
             "isEmailVerified": false  // Initially false, will be updated when verified
         ]
+        
+        // Add homeCity if provided
+        if let homeCity = homeCity, !homeCity.isEmpty {
+            userData["homeCity"] = homeCity
+        }
         
         do {
             try await userRef.setData(userData)
@@ -399,6 +404,20 @@ class DatabaseManager {
             print("✅ Profile image URL updated successfully!")
         } catch {
             print("❌ Error updating profile image URL: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func updateHomeCity(uid: String, homeCity: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "homeCity": homeCity
+            ])
+            print("✅ Home city updated successfully!")
+        } catch {
+            print("❌ Error updating home city: \(error.localizedDescription)")
             throw error
         }
     }
