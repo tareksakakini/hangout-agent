@@ -264,114 +264,261 @@ struct CreateChatbotView: View {
         if searchText.isEmpty {
             return []
         } else {
-            return vm.users.filter { $0.username.lowercased().contains(searchText.lowercased()) }
+            // Filter out the current user since they'll be added by default
+            return vm.users.filter { user in
+                let searchLower = searchText.lowercased()
+                let matchesSearch = user.username.lowercased().contains(searchLower) || 
+                                  user.fullname.lowercased().contains(searchLower)
+                let isNotCurrentUser = user.id != vm.signedInUser?.id
+                return matchesSearch && isNotCurrentUser
+            }
         }
     }
     
     var body: some View {
-        ZStack {
-            Color(.systemGray6)
+        NavigationView {
+            ZStack {
+                // Modern gradient background
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemGray6),
+                        Color(.systemGray5).opacity(0.3)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
                 .ignoresSafeArea()
-            
-            VStack(spacing: 20) {
-                VStack(spacing: 16) {
-                    TextField("Chatbot Name", text: $name)
-                        .padding()
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                        .textInputAutocapitalization(.words)
-                        .disableAutocorrection(true)
-                    
-                    TextField("Search Users...", text: $searchText)
-                        .padding()
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                    
-                    if !filteredUsers.isEmpty {
-                        ScrollView {
-                            VStack(spacing: 12) {
-                                ForEach(filteredUsers) { user in
-                                    HStack {
-                                        Text(user.username)
-                                            .foregroundColor(.primary)
-                                        Spacer()
-                                        Button(action: {
-                                            addSubscriber(username: user.username)
-                                        }) {
-                                            Image(systemName: "plus.circle.fill")
-                                                .foregroundColor(.green)
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Header section
+                        VStack(spacing: 16) {
+                            // Icon
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.7)]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 80, height: 80)
+                                .overlay(
+                                    Image(systemName: "person.3.fill")
+                                        .font(.system(size: 35, weight: .medium))
+                                        .foregroundColor(.white)
+                                )
+                                .shadow(color: Color.blue.opacity(0.3), radius: 15, x: 0, y: 8)
+                            
+                            VStack(spacing: 8) {
+                                Text("Create AI Agent")
+                                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    .foregroundColor(.primary)
+                                
+                                Text("Build your personalized hangout coordinator")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .padding(.top, 20)
+                        
+                        // Main form card
+                        VStack(spacing: 24) {
+                            // Agent name section
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "textformat")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.blue)
+                                    Text("Agent Name")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                TextField("Enter agent name...", text: $name)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 14)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                    .textInputAutocapitalization(.words)
+                                    .disableAutocorrection(true)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(name.isEmpty ? Color.clear : Color.blue.opacity(0.3), lineWidth: 1)
+                                    )
+                            }
+                            
+                            // Search section
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.blue)
+                                    Text("Add Subscribers")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                HStack(spacing: 12) {
+                                    Image(systemName: "person.badge.plus")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.gray)
+                                    
+                                    TextField("Search by name or username...", text: $searchText)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .textInputAutocapitalization(.never)
+                                        .disableAutocorrection(true)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(searchText.isEmpty ? Color.clear : Color.blue.opacity(0.3), lineWidth: 1)
+                                )
+                                
+                                // Search results
+                                if !filteredUsers.isEmpty {
+                                    VStack(spacing: 8) {
+                                        ForEach(filteredUsers) { user in
+                                            UserSearchResultView(
+                                                user: user,
+                                                isSelected: selectedUsers.contains(user.username),
+                                                onTap: {
+                                                    if selectedUsers.contains(user.username) {
+                                                        selectedUsers.remove(user.username)
+                                                    } else {
+                                                        selectedUsers.insert(user.username)
+                                                    }
+                                                }
+                                            )
                                         }
                                     }
-                                    .padding()
-                                    .background(Color.white)
-                                    .cornerRadius(10)
-                                    .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+                                    .padding(.top, 8)
                                 }
                             }
-                        }
-                        .frame(height: 200)
-                    }
-                }
-                .padding()
-                .background(Color.white)
-                .cornerRadius(20)
-                .shadow(radius: 10)
-                .padding(.horizontal)
-                
-                if !selectedUsers.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Selected Subscribers")
-                            .font(.headline)
-                            .padding(.bottom, 8)
-                        
-                        ForEach(Array(selectedUsers), id: \.self) { username in
-                            HStack {
-                                Text(username)
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                Button(action: {
-                                    removeSubscriber(username: username)
-                                }) {
-                                    Image(systemName: "minus.circle.fill")
+                            
+                            // Selected subscribers section
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.2.fill")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.blue)
+                                    Text("Selected Subscribers")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                    
+                                    Spacer()
+                                    
+                                    Text("\(selectedUsers.count + 1)") // +1 for creator
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.blue.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                                
+                                // Show creator first
+                                if let currentUser = vm.signedInUser {
+                                    SelectedUserRowView(
+                                        user: currentUser,
+                                        isCreator: true,
+                                        onRemove: nil
+                                    )
+                                }
+                                
+                                // Show selected users
+                                ForEach(Array(selectedUsers), id: \.self) { username in
+                                    if let user = vm.users.first(where: { $0.username == username }) {
+                                        SelectedUserRowView(
+                                            user: user,
+                                            isCreator: false,
+                                            onRemove: {
+                                                selectedUsers.remove(username)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(16)
+                            .background(Color.blue.opacity(0.05))
+                            .cornerRadius(16)
+                            
+                            // Error message
+                            if let errorMessage = errorMessage {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.red)
+                                    Text(errorMessage)
+                                        .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.red)
                                 }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(12)
+                                .transition(.scale.combined(with: .opacity))
                             }
-                            .padding(.vertical, 4)
                         }
+                        .padding(24)
+                        .background(Color.white)
+                        .cornerRadius(20)
+                        .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 8)
+                        .padding(.horizontal, 20)
+                        
+                        // Create button
+                        Button(action: createChatbot) {
+                            HStack(spacing: 12) {
+                                if name.isEmpty {
+                                    Image(systemName: "textformat")
+                                        .font(.system(size: 16, weight: .medium))
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                                Text("Create AI Agent")
+                                    .font(.system(size: 18, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    gradient: Gradient(colors: name.isEmpty ? 
+                                        [Color.gray.opacity(0.6), Color.gray.opacity(0.4)] :
+                                        [Color.blue, Color.blue.opacity(0.8)]
+                                    ),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .foregroundColor(.white)
+                            .cornerRadius(16)
+                            .shadow(color: name.isEmpty ? Color.clear : Color.blue.opacity(0.3), radius: 10, x: 0, y: 5)
+                            .scaleEffect(name.isEmpty ? 1.0 : 1.02)
+                            .animation(.easeInOut(duration: 0.2), value: name.isEmpty)
+                        }
+                        .disabled(name.isEmpty)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 30)
                     }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(20)
-                    .shadow(radius: 10)
-                    .padding(.horizontal)
                 }
-                
-                if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .padding(.top, 4)
-                }
-                
-                Button(action: createChatbot) {
-                    Text("Create Chatbot")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(name.isEmpty || selectedUsers.isEmpty ? Color.gray : Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                        .shadow(radius: 5)
-                }
-                .disabled(name.isEmpty || selectedUsers.isEmpty)
-                .padding(.horizontal)
-                
-                Spacer()
             }
-            .padding(.top)
+            .navigationTitle("")
+            .navigationBarHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                }
+            }
         }
-        .navigationTitle("Create Chatbot")
         .onAppear {
             Task {
                 vm.users = await vm.getAllUsers()
@@ -379,29 +526,232 @@ struct CreateChatbotView: View {
         }
     }
     
-    func addSubscriber(username: String) {
-        selectedUsers.insert(username)
-        searchText = ""
-    }
-    
-    func removeSubscriber(username: String) {
-        selectedUsers.remove(username)
-    }
-    
     func createChatbot() {
         Task {
             let chatbotID = UUID().uuidString
             if let user = vm.signedInUser {
+                // Always include the creator and selected users
                 var subscribers = Array(selectedUsers)
-                if !subscribers.contains(user.username) {
-                    subscribers.append(user.username)
-                }
+                subscribers.append(user.username)
+                
                 await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, uid: user.id)
                 vm.chatbots = await vm.getAllChatbots()
                 vm.signedInUser = await vm.getUser(uid: user.id)
                 dismiss()
             }
         }
+    }
+}
+
+struct UserSearchResultView: View {
+    let user: User
+    let isSelected: Bool
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Profile picture
+                if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                    AsyncImage(url: URL(string: profileImageUrl)) { phase in
+                        switch phase {
+                        case .empty:
+                            Circle()
+                                .fill(Color.blue.opacity(0.15))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(.blue)
+                                )
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 44, height: 44)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                                )
+                        case .failure(_):
+                            Circle()
+                                .fill(Color.blue.opacity(0.15))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Text(user.fullname.prefix(1).uppercased())
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.blue)
+                                )
+                        @unknown default:
+                            Circle()
+                                .fill(Color.blue.opacity(0.15))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Text(user.fullname.prefix(1).uppercased())
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.blue)
+                                )
+                        }
+                    }
+                } else {
+                    Circle()
+                        .fill(Color.blue.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(user.fullname.prefix(1).uppercased())
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.blue)
+                        )
+                }
+                
+                // User info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(user.fullname)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text("@\(user.username)")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Selection indicator
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.blue : Color.clear)
+                        .frame(width: 24, height: 24)
+                        .overlay(
+                            Circle()
+                                .stroke(isSelected ? Color.blue : Color.gray.opacity(0.5), lineWidth: 2)
+                        )
+                    
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: isSelected)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.blue.opacity(0.08) : Color(.systemGray6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.02 : 1.0)
+            .animation(.easeInOut(duration: 0.2), value: isSelected)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct SelectedUserRowView: View {
+    let user: User
+    let isCreator: Bool
+    let onRemove: (() -> Void)?
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Profile picture
+            if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+                AsyncImage(url: URL(string: profileImageUrl)) { phase in
+                    switch phase {
+                    case .empty:
+                        Circle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .tint(.blue)
+                            )
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 36, height: 36)
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+                            )
+                    case .failure(_):
+                        Circle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(user.fullname.prefix(1).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            )
+                    @unknown default:
+                        Circle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(user.fullname.prefix(1).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            )
+                    }
+                }
+            } else {
+                Circle()
+                    .fill(Color.blue.opacity(0.15))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Text(user.fullname.prefix(1).uppercased())
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.blue)
+                    )
+            }
+            
+            // User info
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(user.fullname)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    if isCreator {
+                        Text("Creator")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                }
+                
+                Text("@\(user.username)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            // Remove button (only for non-creators)
+            if !isCreator, let onRemove = onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white)
+        .cornerRadius(10)
     }
 }
 
