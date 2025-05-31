@@ -386,6 +386,60 @@ async function analyzeChatsAndSuggestOutings() {
         console.log(`Location context for OpenAI: ${locationContext}`);
       }
 
+      // Get current date information for accurate weekend date suggestions
+      const now = new Date();
+      const currentDateString = now.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      const currentDayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      
+      // Calculate next weekend dates
+      let daysUntilSaturday = (6 - currentDayOfWeek) % 7;
+      let daysUntilSunday = (7 - currentDayOfWeek) % 7;
+      
+      // If it's already weekend, get next weekend
+      if (currentDayOfWeek === 0) { // Sunday
+        daysUntilSaturday = 6;
+        daysUntilSunday = 7;
+      } else if (currentDayOfWeek === 6) { // Saturday
+        daysUntilSaturday = 7;
+        daysUntilSunday = 1;
+      }
+      
+      const nextSaturday = new Date(now);
+      nextSaturday.setDate(now.getDate() + daysUntilSaturday);
+      const nextSunday = new Date(now);
+      nextSunday.setDate(now.getDate() + daysUntilSunday);
+      
+      const nextSaturdayString = nextSaturday.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      const nextSundayString = nextSunday.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      
+      // Format dates for the event cards (YYYY-MM-DD format)
+      const nextSaturdayFormatted = nextSaturday.toISOString().split('T')[0];
+      const nextSundayFormatted = nextSunday.toISOString().split('T')[0];
+      
+      const dateContext = `\n\nCurrent date: ${currentDateString}
+Next Weekend Dates:
+- Saturday: ${nextSaturdayString} (use ${nextSaturdayFormatted} in Date field)
+- Sunday: ${nextSundayString} (use ${nextSundayFormatted} in Date field)
+
+Please use these exact dates in your suggestions and vary between Saturday and Sunday events.`;
+      
+      console.log(`Date context for OpenAI: ${dateContext}`);
+
       console.log('Calling OpenAI to generate suggestions');
       try {
         // Set a timeout for the OpenAI call (30 seconds)
@@ -398,11 +452,11 @@ async function analyzeChatsAndSuggestOutings() {
           messages: [
             {
               role: "system",
-              content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. For each suggestion, include activity, specific location with address, date (next weekend), specific start and end times. When subscriber locations are provided, prioritize activities in or accessible from those areas."
+              content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. For each suggestion, include activity, specific location with address, date (use the exact dates provided), specific start and end times. When subscriber locations are provided, prioritize activities in or accessible from those areas. IMPORTANT: Use the exact date format provided (YYYY-MM-DD) in the Date field."
             },
             {
               role: "user",
-              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}${locationContext}\n\nBased on this conversation and the subscriber locations, suggest 5 outing options. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date, Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
+              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}${locationContext}${dateContext}\n\nBased on this conversation, subscriber locations, and the current date context, suggest 5 outing options for the upcoming weekend. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date (use YYYY-MM-DD format), Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
             }
           ],
           temperature: 0.8
@@ -673,7 +727,7 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('27 18 * * 5')
+  .schedule('06 19 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => sendMessagesToSubscribers());
 
@@ -685,7 +739,7 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('30 18 * * 5')
+  .schedule('09 19 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
@@ -697,7 +751,7 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('33 18 * * 5')
+  .schedule('12 19 * * 5')
   .timeZone('America/Los_Angeles')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
