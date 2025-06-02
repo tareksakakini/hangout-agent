@@ -124,6 +124,12 @@ extension ChatView {
                     // Send user's message
                     await vm.sendMessage(chat: chat, text: currentMessage, senderId: user.id, side: "user")
                     
+                    // NOTE: AI responses are now handled server-side via Firebase Cloud Functions
+                    // The server automatically detects new messages and generates appropriate responses
+                    // This prevents duplicate responses and enables better cross-user coordination
+                    
+                    /*
+                    // DISABLED: iOS-side AI response logic (now handled server-side)
                     // Fetch all chats for this chatbot
                     let allChats = await vm.getAllChatsForChatbot(chatbotId: chatbot.id)
                     
@@ -147,6 +153,7 @@ extension ChatView {
                     // ⚙️ Execute API calls (e.g. text other group members)
                     await vm.performParsedAPICalls(parsedAgentResponse.apiCalls, chatbot: chatbot)
                     //print(parsedAgentResponse.apiCalls)
+                    */
                 }
             }) {
                 Image(systemName: "paperplane.fill")
