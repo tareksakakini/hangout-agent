@@ -12,14 +12,163 @@ const openai = new OpenAI({
 // Function to generate the system prompt
 async function generateSystemPrompt(chatId) {
   const today = new Date().toISOString().split('T')[0];
+  const currentTime = new Date().toLocaleTimeString();
   const chatDoc = await db.collection('chats').doc(chatId).get();
   const chatData = chatDoc.data();
+  if (!chatData) {
+    throw new Error(`Chat with ID ${chatId} not found.`);
+  }
   const chatbotId = chatData.chatbotId;
+  const userId = chatData.userId;
+
+  console.log(`Chat data:`, chatData);
+  console.log(`Chatbot ID: ${chatbotId}, User ID: ${userId}`);
+
+  // Fetch chatbot details
   const chatbotDoc = await db.collection('chatbots').doc(chatbotId).get();
   const chatbotData = chatbotDoc.data();
+  if (!chatbotData) {
+    throw new Error(`Chatbot with ID ${chatbotId} not found.`);
+  }
   const chatbotName = chatbotData.name;
-  const subscribers = chatbotData.subscribers;
-  return `You are a helpful and useful assistant. Today's date is ${today}. The user is chatting with ${chatbotName}, which has ${subscribers.length} subscribers.`;
+  const subscribers = chatbotData.subscribers || [];
+
+  console.log(`Chatbot data:`, chatbotData);
+  console.log(`Subscribers:`, subscribers);
+
+  // Fetch user details
+  const userDoc = await db.collection('users').doc(userId).get();
+  const userData = userDoc.data();
+  if (!userData) {
+    throw new Error(`User with ID ${userId} not found.`);
+  }
+  const userName = userData.fullname;
+  const userUsername = userData.username;
+
+  console.log(`User data:`, userData);
+
+  // Fetch details of users subscribed to this chatbot
+  const groupMembers = [];
+  for (const subscriberId of subscribers) {
+    console.log(`Fetching subscriber: ${subscriberId}`);
+    
+    // First try fetching by document ID (assuming subscriberId is a user ID)
+    let subscriberDoc = await db.collection('users').doc(subscriberId).get();
+    let subscriberData = subscriberDoc.data();
+    
+    // If not found by ID, try querying by username
+    if (!subscriberData) {
+      console.log(`Subscriber not found by ID ${subscriberId}, trying username search...`);
+      const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+      if (!usernameQuery.empty) {
+        subscriberDoc = usernameQuery.docs[0];
+        subscriberData = subscriberDoc.data();
+        console.log(`Found subscriber by username: ${subscriberId}`);
+      }
+    }
+    
+    if (!subscriberData) {
+      console.error(`Subscriber with ID/username ${subscriberId} not found.`);
+      throw new Error(`Subscriber with ID/username ${subscriberId} not found.`);
+    }
+    if (!subscriberData.fullname || !subscriberData.username) {
+      console.error(`Subscriber ${subscriberId} missing required fields:`, subscriberData);
+      throw new Error(`Subscriber ${subscriberId} missing required fields (fullname or username).`);
+    }
+    groupMembers.push({
+      name: subscriberData.fullname,
+      username: subscriberData.username,
+      homeCity: subscriberData.homeCity || 'Unknown'
+    });
+    console.log(`Added subscriber: ${subscriberData.fullname} (${subscriberData.username})`);
+  }
+
+  console.log(`Group members:`, groupMembers);
+
+  // Create a mapping of user IDs to names for chat history
+  const userIdToNameMap = {};
+  
+  // Add current user to the mapping
+  userIdToNameMap[userId] = userName;
+  
+  // Add all subscribers to the mapping
+  for (const subscriberId of subscribers) {
+    let subscriberDoc = await db.collection('users').doc(subscriberId).get();
+    let subscriberData = subscriberDoc.data();
+    
+    if (!subscriberData) {
+      const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+      if (!usernameQuery.empty) {
+        subscriberDoc = usernameQuery.docs[0];
+        subscriberData = subscriberDoc.data();
+      }
+    }
+    
+    if (subscriberData && subscriberData.fullname) {
+      userIdToNameMap[subscriberDoc.id] = subscriberData.fullname;
+      userIdToNameMap[subscriberData.username] = subscriberData.fullname; // Handle both ID and username
+    }
+  }
+  
+  // Add chatbot to the mapping
+  userIdToNameMap['chatbot'] = chatbotName;
+  
+  console.log('User ID to Name mapping:', userIdToNameMap);
+
+  // Fetch chat history from all chats with this chatbot (excluding current user's chat)
+  const allChatsSnapshot = await db.collection('chats').where('chatbotId', '==', chatbotId).get();
+  const chatHistoryByUser = {};
+  
+  for (const chatDoc of allChatsSnapshot.docs) {
+    // Skip the current user's chat since it's included later
+    if (chatDoc.id === chatId) continue;
+    
+    const chatData = chatDoc.data();
+    const chatUserId = chatData.userId;
+    const chatUserName = userIdToNameMap[chatUserId] || `User ${chatUserId}`;
+    
+    const messagesSnapshot = await db.collection('chats').doc(chatDoc.id).collection('messages').orderBy('timestamp', 'asc').limit(10).get();
+    const userMessages = [];
+    
+    messagesSnapshot.docs.forEach(messageDoc => {
+      const data = messageDoc.data();
+      if (data.timestamp && data.text && data.senderId) {
+        const senderName = userIdToNameMap[data.senderId] || data.senderId;
+        userMessages.push({
+          sender: senderName,
+          text: data.text,
+          timestamp: data.timestamp.toDate()
+        });
+      }
+    });
+    
+    if (userMessages.length > 0) {
+      chatHistoryByUser[chatUserName] = userMessages;
+    }
+  }
+
+  // Format chat history by user
+  const formattedChatHistory = Object.entries(chatHistoryByUser)
+    .map(([userName, messages]) => {
+      const messageList = messages
+        .map(msg => `  [${msg.timestamp.toLocaleString()}] ${msg.sender}: ${msg.text}`)
+        .join('\n');
+      return `${userName}'s conversation:\n${messageList}`;
+    })
+    .join('\n\n');
+
+  return `
+You are a helpful and useful assistant. Your name is ${chatbotName}. Today's date is ${today}, and the current time is ${currentTime}.
+
+Group Members:
+${groupMembers.map(member => `- ${member.name} (${member.username}) from ${member.homeCity}`).join('\n')}
+
+Current User:
+- ${userName} (${userUsername})
+
+Other Conversations:
+${formattedChatHistory || 'No other conversations yet.'}
+`;
 }
 
 // Firestore trigger: on new user message, generate bot reply
