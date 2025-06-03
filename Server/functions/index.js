@@ -168,6 +168,22 @@ Current User:
 
 Other Conversations:
 ${formattedChatHistory || 'No other conversations yet.'}
+
+IMPORTANT: Format your response as a JSON array of objects. Each object represents a potential message to a user and must have this exact structure:
+{
+  "username": "username_here",
+  "send_message": true/false,
+  "message_content": "message text here (only meaningful if send_message is true)"
+}
+
+Include one object for each group member (including the current user). Set send_message to true only for users you want to send a message to. Always include the current user with send_message: true unless there's no response needed.
+
+Example format:
+[
+  {"username": "${userUsername}", "send_message": true, "message_content": "Your reply to the current user"},
+  {"username": "other_user1", "send_message": false, "message_content": ""},
+  {"username": "other_user2", "send_message": true, "message_content": "Message for this user"}
+]
 `;
 }
 
@@ -182,6 +198,46 @@ exports.onMessageCreate = functions.firestore
     if (!message || message.side !== 'user') return null;
 
     try {
+      // Fetch chat data for later use
+      const chatDoc = await db.collection('chats').doc(chatId).get();
+      const chatData = chatDoc.data();
+      if (!chatData) {
+        throw new Error(`Chat with ID ${chatId} not found.`);
+      }
+
+      // Create username to user ID mapping for message processing
+      const usernameToUserIdMap = {};
+      const chatbotDoc = await db.collection('chatbots').doc(chatData.chatbotId).get();
+      const chatbotData = chatbotDoc.data();
+      const subscribers = chatbotData.subscribers || [];
+
+      // Get current user data
+      const currentUserDoc = await db.collection('users').doc(chatData.userId).get();
+      const currentUserData = currentUserDoc.data();
+      if (currentUserData) {
+        usernameToUserIdMap[currentUserData.username] = chatData.userId;
+      }
+
+      // Get all subscribers' data
+      for (const subscriberId of subscribers) {
+        let subscriberDoc = await db.collection('users').doc(subscriberId).get();
+        let subscriberData = subscriberDoc.data();
+        
+        if (!subscriberData) {
+          const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+          if (!usernameQuery.empty) {
+            subscriberDoc = usernameQuery.docs[0];
+            subscriberData = subscriberDoc.data();
+          }
+        }
+        
+        if (subscriberData && subscriberData.username) {
+          usernameToUserIdMap[subscriberData.username] = subscriberDoc.id;
+        }
+      }
+
+      console.log('Username to User ID mapping:', usernameToUserIdMap);
+
       // Fetch last 10 messages for context, ordered by timestamp
       const messagesSnap = await db
         .collection('chats')
@@ -222,23 +278,83 @@ exports.onMessageCreate = functions.firestore
 
       // Call OpenAI
       const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4.1-2025-04-14',
         messages: prompt,
-        max_tokens: 256,
+        max_tokens: 512,
         temperature: 0.7,
       });
       const reply = completion.choices[0]?.message?.content?.trim();
       if (!reply) return null;
 
-      // Write bot response as a new message
-      const botMessage = {
-        id: admin.firestore().collection('_').doc().id,
-        text: reply,
-        senderId: 'chatbot',
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        side: 'bot',
-      };
-      await db.collection('chats').doc(chatId).collection('messages').doc(botMessage.id).set(botMessage);
+      console.log('OpenAI raw response:', reply);
+
+      // Parse the JSON response
+      let responseMessages;
+      try {
+        responseMessages = JSON.parse(reply);
+      } catch (parseError) {
+        console.error('Failed to parse JSON response:', parseError);
+        // Fallback: send reply as normal message to current user
+        const botMessage = {
+          id: admin.firestore().collection('_').doc().id,
+          text: reply,
+          senderId: 'chatbot',
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          side: 'bot',
+        };
+        await db.collection('chats').doc(chatId).collection('messages').doc(botMessage.id).set(botMessage);
+        return true;
+      }
+
+      console.log('Parsed response messages:', responseMessages);
+
+      // Process each message in the response
+      for (const messageObj of responseMessages) {
+        console.log('Processing message for:', messageObj.username, 'send_message:', messageObj.send_message);
+        
+        if (messageObj.send_message && messageObj.message_content) {
+          const targetUserId = usernameToUserIdMap[messageObj.username];
+          console.log('Target user ID for username', messageObj.username, ':', targetUserId);
+          
+          if (targetUserId === chatData.userId) {
+            // Send to current user's chat
+            console.log('Sending message to current user');
+            const botMessage = {
+              id: admin.firestore().collection('_').doc().id,
+              text: messageObj.message_content,
+              senderId: 'chatbot',
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              side: 'bot',
+            };
+            await db.collection('chats').doc(chatId).collection('messages').doc(botMessage.id).set(botMessage);
+          } else if (targetUserId) {
+            // Find and send to other user's chat with this chatbot
+            console.log('Looking for chat for user ID:', targetUserId);
+            const otherUserChatsQuery = await db.collection('chats')
+              .where('chatbotId', '==', chatData.chatbotId)
+              .where('userId', '==', targetUserId)
+              .get();
+            
+            if (!otherUserChatsQuery.empty) {
+              const otherChatId = otherUserChatsQuery.docs[0].id;
+              console.log('Sending message to other user chat:', otherChatId);
+              const botMessage = {
+                id: admin.firestore().collection('_').doc().id,
+                text: messageObj.message_content,
+                senderId: 'chatbot',
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                side: 'bot',
+              };
+              await db.collection('chats').doc(otherChatId).collection('messages').doc(botMessage.id).set(botMessage);
+            } else {
+              console.log('No chat found for user ID:', targetUserId);
+            }
+          } else {
+            console.log('No user ID found for username:', messageObj.username);
+          }
+        }
+      }
+
       return true;
     } catch (err) {
       console.error('Error generating bot reply:', err);
