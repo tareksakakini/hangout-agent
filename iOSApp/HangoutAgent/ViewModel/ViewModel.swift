@@ -40,22 +40,12 @@ class ViewModel: ObservableObject {
         return nil
     }
     
-    func botReply(messageText: String) async -> String {
-        do {
-            return try await generateOpenAIResponse(prompt: messageText)
-        } catch {
-            print("Error: \(error)")
-            return messageText + ", yourself."
-        }
-    }
-    
     func signupButtonPressed(fullname: String, username: String, email: String, password: String, homeCity: String? = nil) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
             let firestoreService = DatabaseManager()
             try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity)
             let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity)
-            print("📧 Account created successfully! Please check your email to verify your account.")
             return user
         } catch {
             print(error)
@@ -79,10 +69,6 @@ class ViewModel: ObservableObject {
                 // Update Firestore to match Firebase Auth
                 try await firestoreService.updateEmailVerificationStatus(uid: authUser.uid, isVerified: authVerificationStatus)
                 user.isEmailVerified = authVerificationStatus
-                
-                if authVerificationStatus {
-                    print("✅ Email verification status updated - user is now verified!")
-                }
             }
             
             return user
@@ -155,7 +141,7 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func sendMessage(chat: Chat, text: String, senderId: String, side: String, eventCard: EventCard? = nil) async {
+    func sendMessage(chat: Chat, text: String, senderId: String, side: String) async {
         do {
             let firestoreService = DatabaseManager()
             let message = Message(
@@ -163,8 +149,7 @@ class ViewModel: ObservableObject {
                 text: text,
                 senderId: senderId,
                 timestamp: Date(),
-                side: side,
-                eventCard: eventCard
+                side: side
             )
             try await firestoreService.sendMessageToChat(chatId: chat.id, message: message)
         } catch {
@@ -252,10 +237,6 @@ class ViewModel: ObservableObject {
                 if authVerificationStatus != user.isEmailVerified {
                     try await firestoreService.updateEmailVerificationStatus(uid: firebaseUser.uid, isVerified: authVerificationStatus)
                     user.isEmailVerified = authVerificationStatus
-                    
-                    if authVerificationStatus {
-                        print("✅ Email verification status synced - user is verified!")
-                    }
                 }
                 
                 DispatchQueue.main.async {
@@ -268,73 +249,6 @@ class ViewModel: ObservableObject {
             }
         } catch {
             print("Error loading signed in user: \(error)")
-        }
-    }
-    
-    func parseAgentResponse(response: String) -> ParsedAgentResponse {
-        var messageToUser = ""
-        var apiCalls: [ParsedToolCall] = []
-        
-        // Extract <response>...</response>
-        if let responseStart = response.range(of: "<response>"),
-           let responseEnd = response.range(of: "</response>") {
-            messageToUser = String(response[responseStart.upperBound..<responseEnd.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        // Extract all <api_call>...</api_call> blocks
-        let pattern = #"<api_call>\s*(\{[\s\S]*?\})\s*</api_call>"#
-        let regex = try? NSRegularExpression(pattern: pattern)
-        
-        let matches = regex?.matches(in: response, range: NSRange(response.startIndex..., in: response)) ?? []
-        
-        for match in matches {
-            if let range = Range(match.range(at: 1), in: response) {
-                let jsonString = String(response[range])
-                if let jsonData = jsonString.data(using: .utf8) {
-                    if let call = try? JSONDecoder().decode(ParsedToolCall.self, from: jsonData) {
-                        apiCalls.append(call)
-                    }
-                }
-            }
-        }
-        
-        return ParsedAgentResponse(messageToUser: messageToUser, apiCalls: apiCalls)
-    }
-    
-    func performParsedAPICalls(_ apiCalls: [ParsedToolCall], chatbot: Chatbot) async {
-        guard let sender = signedInUser else { return }
-
-        for call in apiCalls {
-            switch call.function {
-            case "text":
-                guard
-                    let recipientUsername = call.arguments["username"],
-                    let messageText = call.arguments["message"],
-                    let recipientUser = users.first(where: { $0.username == recipientUsername })
-                else {
-                    print("❌ Invalid text API call or recipient not found.")
-                    continue
-                }
-
-                guard let chat = await fetchOrCreateChat(userId: recipientUser.id, chatbotId: chatbot.id) else {
-                    print("❌ Could not fetch/create chat for recipient.")
-                    continue
-                }
-
-                // Check if this is an event card message
-                if let eventCardJson = call.arguments["eventCard"],
-                   let eventCardData = eventCardJson.data(using: .utf8),
-                   let eventCard = try? JSONDecoder().decode(EventCard.self, from: eventCardData) {
-                    print("📋 Sending message with event card: \(eventCard.activity)")
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot", eventCard: eventCard)
-                } else {
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot")
-                }
-
-            default:
-                print("⚠️ Unknown function: \(call.function)")
-            }
         }
     }
     
@@ -371,27 +285,15 @@ class ViewModel: ObservableObject {
     }
 
     func startListeningToMessages(chatId: String) {
-        print("📱 Starting to listen to messages for chat: \(chatId)")
         // Remove existing listener if any
         stopListeningToMessages(chatId: chatId)
         
         let firestoreService = DatabaseManager()
         let listener = firestoreService.listenToMessages(chatId: chatId) { [weak self] messages in
-            print("📱 Received \(messages.count) messages update for chat: \(chatId)")
             DispatchQueue.main.async {
                 if let index = self?.chats.firstIndex(where: { $0.id == chatId }) {
-                    print("📱 Updating messages for chat at index: \(index)")
                     self?.chats[index].messages = messages
-                    print("📱 Updated messages count: \(messages.count)")
-                    
-                    // Log event cards if present
-                    let eventCards = messages.compactMap { $0.eventCard }
-                    if !eventCards.isEmpty {
-                        print("📋 Found \(eventCards.count) event cards in messages")
-                        for card in eventCards {
-                            print("📋 Event card for activity: \(card.activity)")
-                        }
-                    }
+            
                 } else {
                     print("❌ Could not find chat with id: \(chatId)")
                 }
@@ -401,7 +303,6 @@ class ViewModel: ObservableObject {
     }
 
     func stopListeningToMessages(chatId: String) {
-        print("📱 Stopping message listener for chat: \(chatId)")
         messageListeners[chatId]?.remove()
         messageListeners.removeValue(forKey: chatId)
     }
@@ -440,8 +341,6 @@ class ViewModel: ObservableObject {
             
             // Reload groups to update the UI
             await loadGroupsForUser()
-            
-            print("✅ Successfully created group: \(name) with ID: \(groupId)")
             return true
             
         } catch {
@@ -472,8 +371,6 @@ class ViewModel: ObservableObject {
             return 
         }
         
-        print("📱 Loading groups for user: \(user.fullname) (ID: \(user.id))")
-        
         do {
             let firestoreService = DatabaseManager()
             // Remove the .order(by:) to avoid composite index requirement
@@ -487,8 +384,6 @@ class ViewModel: ObservableObject {
             
             for groupDoc in groupsSnapshot.documents {
                 let data = groupDoc.data()
-                print("📱 Processing group document: \(groupDoc.documentID)")
-                print("📱 Group data: \(data)")
                 
                 let dateFormatter = DateFormatter()
                 let group = HangoutGroup(
@@ -497,12 +392,10 @@ class ViewModel: ObservableObject {
                     participants: data["participants"] as? [String] ?? [],
                     participantNames: data["participantNames"] as? [String] ?? [],
                     createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
-                    eventDetails: nil, // We'll decode this separately if needed
                     lastMessage: data["lastMessage"] as? String,
                     updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
                 )
-                
-                print("📱 Created group object: \(group.name) with \(group.participants.count) participants")
+            
                 loadedGroups.append(group)
             }
             
@@ -511,7 +404,6 @@ class ViewModel: ObservableObject {
             
             DispatchQueue.main.async {
                 self.groups = loadedGroups
-                print("📱 Updated UI with \(loadedGroups.count) groups")
                 
                 // Start listening to messages for each group
                 for group in loadedGroups {
@@ -565,7 +457,6 @@ class ViewModel: ObservableObject {
     }
     
     func startListeningToGroupMessages(groupId: String) {
-        print("📱 Starting to listen to group messages for group: \(groupId)")
         // Remove existing listener if any
         stopListeningToGroupMessages(groupId: groupId)
         
@@ -606,36 +497,8 @@ class ViewModel: ObservableObject {
     }
     
     func stopListeningToGroupMessages(groupId: String) {
-        print("📱 Stopping group message listener for group: \(groupId)")
         groupMessageListeners[groupId]?.remove()
         groupMessageListeners.removeValue(forKey: groupId)
-    }
-    
-    func leaveGroup(groupId: String) async {
-        guard let user = signedInUser else { return }
-        
-        do {
-            let firestoreService = DatabaseManager()
-            
-            // Remove user from group participants
-            try await firestoreService.db.collection("groups")
-                .document(groupId)
-                .updateData([
-                    "participants": FieldValue.arrayRemove([user.id]),
-                    "participantNames": FieldValue.arrayRemove([user.fullname])
-                ])
-            
-            // Stop listening to messages for this group
-            stopListeningToGroupMessages(groupId: groupId)
-            
-            // Remove group from local data
-            DispatchQueue.main.async {
-                self.groups.removeAll { $0.id == groupId }
-            }
-            
-        } catch {
-            print("Error leaving group: \(error)")
-        }
     }
     
     // Check and update email verification status
@@ -654,10 +517,6 @@ class ViewModel: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self.signedInUser?.isEmailVerified = authVerificationStatus
-                }
-                
-                if authVerificationStatus {
-                    print("✅ Email verification confirmed!")
                 }
             }
         } catch {

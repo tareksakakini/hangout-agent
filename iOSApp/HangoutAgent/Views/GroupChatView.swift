@@ -119,21 +119,3 @@ struct GroupMessageView: View {
         return formatter.string(from: timestamp)
     }
 }
-
-#Preview {
-    NavigationView {
-        GroupChatView(
-            group: HangoutGroup(
-                id: "preview",
-                name: "Preview Group",
-                participants: ["user1", "user2"],
-                participantNames: ["User 1", "User 2"],
-                createdAt: Date(),
-                eventDetails: nil,
-                lastMessage: nil,
-                updatedAt: Date()
-            )
-        )
-        .environmentObject(ViewModel())
-    }
-} 

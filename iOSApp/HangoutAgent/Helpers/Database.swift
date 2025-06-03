@@ -214,22 +214,6 @@ class DatabaseManager {
             "side": message.side
         ]
         
-        // Add eventCard if present
-        if let eventCard = message.eventCard {
-            print("📋 Adding event card to message: \(eventCard.activity)")
-            messageData["eventCard"] = [
-                "type": eventCard.type,
-                "activity": eventCard.activity,
-                "location": eventCard.location,
-                "date": eventCard.date,
-                "startTime": eventCard.startTime,
-                "endTime": eventCard.endTime,
-                "description": eventCard.description,
-                "imageUrl": eventCard.imageUrl,
-                "attendees": eventCard.attendees
-            ]
-        }
-        
         try await messageRef.setData(messageData)
         
         // Update last message in parent chat
@@ -344,32 +328,15 @@ class DatabaseManager {
                     // Get text field, defaulting to empty string if not present
                     let text = data["text"] as? String ?? ""
                     
-                    // Try to decode eventCard if present
-                    var eventCard: EventCard? = nil
-                    if let eventCardData = data["eventCard"] as? [String: Any] {
-                        print("📄 Found eventCard data: \(eventCardData)")
-                        do {
-                            let jsonData = try JSONSerialization.data(withJSONObject: eventCardData)
-                            eventCard = try JSONDecoder().decode(EventCard.self, from: jsonData)
-                            print("✅ Successfully decoded eventCard")
-                        } catch {
-                            print("❌ Failed to decode eventCard: \(error)")
-                        }
-                    }
-                    
                     let message = Message(
                         id: id,
                         text: text,
                         senderId: senderId,
                         timestamp: timestamp,
-                        side: side,
-                        eventCard: eventCard
+                        side: side
                     )
                     
                     print("✅ Successfully created message with id: \(id)")
-                    if eventCard != nil {
-                        print("📋 Message contains eventCard for activity: \(eventCard?.activity ?? "unknown")")
-                    }
                     
                     return message
                 }
