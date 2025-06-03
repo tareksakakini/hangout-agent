@@ -7,7 +7,9 @@ struct ChatView: View {
     @State var user: User
     @State var chatbot: Chatbot
     var chat: Chat? {
-        vm.chats.first(where: { $0.userID == user.id && $0.chatbotID == chatbot.id })
+        vm.chats.first { chat in
+            chat.userID == user.id && chat.chatbotID == chatbot.id
+        }
     }
     
     @State var messageText: String = ""
@@ -19,21 +21,13 @@ struct ChatView: View {
                 ScrollView {
                     if let chat {
                         VStack(spacing: 12) {
-                            ForEach(0..<chat.messages.count, id: \.self) { index in
-                                let message = chat.messages[index]
-                                if message.eventCard != nil {
-                                    // Check if this is the start of a new group of event cards
-                                    let isStartOfGroup = index == 0 || chat.messages[index - 1].eventCard == nil
-                                    
-                                } else {
-                                    // Display text message
-                                    MessageView(
-                                        text: message.text,
-                                        alignment: message.side == "user" ? .trailing : .leading,
-                                        timestamp: message.timestamp
-                                    )
-                                    .id(message.id)
-                                }
+                            ForEach(chat.messages, id: \.id) { message in
+                                MessageView(
+                                    text: message.text,
+                                    alignment: message.side == "user" ? .trailing : .leading,
+                                    timestamp: message.timestamp
+                                )
+                                .id(message.id)
                             }
                         }
                     }
