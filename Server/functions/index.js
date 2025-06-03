@@ -9,6 +9,19 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || functions.config().openai?.key,
 });
 
+// Function to generate the system prompt
+async function generateSystemPrompt(chatId) {
+  const today = new Date().toISOString().split('T')[0];
+  const chatDoc = await db.collection('chats').doc(chatId).get();
+  const chatData = chatDoc.data();
+  const chatbotId = chatData.chatbotId;
+  const chatbotDoc = await db.collection('chatbots').doc(chatbotId).get();
+  const chatbotData = chatbotDoc.data();
+  const chatbotName = chatbotData.name;
+  const subscribers = chatbotData.subscribers;
+  return `You are a helpful and useful assistant. Today's date is ${today}. The user is chatting with ${chatbotName}, which has ${subscribers.length} subscribers.`;
+}
+
 // Firestore trigger: on new user message, generate bot reply
 exports.onMessageCreate = functions.firestore
   .document('chats/{chatId}/messages/{messageId}')
@@ -49,10 +62,19 @@ exports.onMessageCreate = functions.firestore
         chatHistory.push({ role: 'user', content: message.text });
       }
 
+      // Construct the prompt (generalizable for future expansion)
+      const prompt = [
+        { role: 'system', content: await generateSystemPrompt(chatId) },
+        ...chatHistory
+      ];
+
+      // Log the exact prompt sent to OpenAI
+      console.log('OpenAI prompt:', JSON.stringify(prompt, null, 2));
+
       // Call OpenAI
       const completion = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
-        messages: chatHistory,
+        messages: prompt,
         max_tokens: 256,
         temperature: 0.7,
       });
