@@ -35,6 +35,7 @@ struct ProfileView: View {
     @State private var isUpdatingHomeCity = false
     @State private var homeCityUpdateResult: (success: Bool, message: String)? = nil
     @State private var showHomeCityUpdateResult = false
+    @State private var showFullSizeImage = false
 
     var isCurrentUser: Bool {
         guard let user = user else { return true }
@@ -71,6 +72,9 @@ struct ProfileView: View {
                                                 .aspectRatio(contentMode: .fill)
                                                 .frame(width: 90, height: 90)
                                                 .clipShape(Circle())
+                                                .onTapGesture {
+                                                    if !isCurrentUser { showFullSizeImage = true }
+                                                }
                                         case .failure(_):
                                             Circle()
                                                 .fill(Color.black)
@@ -383,6 +387,45 @@ struct ProfileView: View {
                         selectedImage = nil
                     }
                 )
+            }
+        }
+        .sheet(isPresented: $showFullSizeImage) {
+            if let profileImageUrl = displayUser?.profileImageUrl, !profileImageUrl.isEmpty {
+                ZStack {
+                    Color(.systemBackground).ignoresSafeArea()
+                    AsyncImage(url: URL(string: profileImageUrl)) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView().tint(.gray)
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color(.systemBackground))
+                        case .failure(_):
+                            Image(systemName: "person.crop.circle.badge.exclam")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 120, height: 120)
+                                .foregroundColor(.gray.opacity(0.7))
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: { showFullSizeImage = false }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.gray.opacity(0.8))
+                                    .padding()
+                            }
+                        }
+                        Spacer()
+                    }
+                }
             }
         }
         .onChange(of: displayUser?.profileImageUrl) { oldValue, newValue in
