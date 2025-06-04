@@ -13,11 +13,12 @@ struct UserSearchResultView: View {
     let user: User
     let isSelected: Bool
     let onTap: () -> Void
+    let onViewProfile: () -> Void
     
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Profile picture
+        HStack(spacing: 12) {
+            // Profile picture (tappable for profile)
+            Group {
                 if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
                     AsyncImage(url: URL(string: profileImageUrl)) { phase in
                         switch phase {
@@ -70,8 +71,12 @@ struct UserSearchResultView: View {
                                 .foregroundColor(.blue)
                         )
                 }
-                
-                // User info
+            }
+            .onTapGesture {
+                onViewProfile()
+            }
+            // Rest of row (select/deselect)
+            Button(action: onTap) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(user.fullname)
                         .font(.system(size: 16, weight: .semibold))
@@ -80,10 +85,7 @@ struct UserSearchResultView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.secondary)
                 }
-                
                 Spacer()
-                
-                // Selection indicator
                 ZStack {
                     Circle()
                         .fill(isSelected ? Color.blue : Color.clear)
@@ -92,7 +94,6 @@ struct UserSearchResultView: View {
                             Circle()
                                 .stroke(isSelected ? Color.blue : Color.gray.opacity(0.5), lineWidth: 2)
                         )
-                    
                     if isSelected {
                         Image(systemName: "checkmark")
                             .font(.system(size: 12, weight: .bold))
@@ -101,19 +102,19 @@ struct UserSearchResultView: View {
                 }
                 .animation(.easeInOut(duration: 0.2), value: isSelected)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.08) : Color(.systemGray6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
-                    )
-            )
-            .scaleEffect(isSelected ? 1.02 : 1.0)
-            .animation(.easeInOut(duration: 0.2), value: isSelected)
+            .buttonStyle(PlainButtonStyle())
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.blue.opacity(0.08) : Color(.systemGray6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isSelected ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                )
+        )
+        .scaleEffect(isSelected ? 1.02 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 }

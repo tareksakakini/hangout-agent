@@ -13,6 +13,8 @@ struct ProfileView: View {
     @EnvironmentObject private var vm: ViewModel
     @Environment(\.dismiss) private var dismiss
     
+    var user: User? = nil
+    
     @State private var showDeleteConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteResult: (success: Bool, message: String)? = nil
@@ -34,21 +36,28 @@ struct ProfileView: View {
     @State private var homeCityUpdateResult: (success: Bool, message: String)? = nil
     @State private var showHomeCityUpdateResult = false
 
+    var isCurrentUser: Bool {
+        guard let user = user else { return true }
+        return user.id == vm.signedInUser?.id
+    }
+    
+    var displayUser: User? {
+        user ?? vm.signedInUser
+    }
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 // User Info Section
-                if let user = vm.signedInUser {
-        VStack(spacing: 20) {
-                        // Profile Avatar with Edit Functionality
+                if let user = displayUser {
+                    VStack(spacing: 20) {
+                        // Profile Avatar
                         VStack(spacing: 12) {
                             ZStack {
                                 if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
-                                    // Show actual profile image
                                     AsyncImage(url: URL(string: profileImageUrl)) { phase in
                                         switch phase {
                                         case .empty:
-                                            // Loading state
                                             Circle()
                                                 .fill(Color.black.opacity(0.1))
                                                 .frame(width: 90, height: 90)
@@ -57,14 +66,12 @@ struct ProfileView: View {
                                                         .tint(.black.opacity(0.6))
                                                 )
                                         case .success(let image):
-                                            // Successfully loaded image
                                             image
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fill)
                                                 .frame(width: 90, height: 90)
                                                 .clipShape(Circle())
                                         case .failure(_):
-                                            // Failed to load - show fallback
                                             Circle()
                                                 .fill(Color.black)
                                                 .frame(width: 90, height: 90)
@@ -79,7 +86,6 @@ struct ProfileView: View {
                                     }
                                     .id(imageRefreshId)
                                 } else {
-                                    // Default avatar with initials
                                     Circle()
                                         .fill(Color.black)
                                         .frame(width: 90, height: 90)
@@ -89,78 +95,32 @@ struct ProfileView: View {
                                                 .foregroundColor(.white)
                                         )
                                 }
-                                
-                                // Edit button overlay
-                                Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 28, height: 28)
-                                    .overlay(
-                                        Button(action: {
-                                            showPhotoActionSheet = true
-                                        }) {
-                                            Image(systemName: "camera.fill")
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.7))
-                                        }
-                                    )
-                                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
-                                    .offset(x: 30, y: 30)
+                                // Only show edit button for current user
+                                if isCurrentUser {
+                                    Circle()
+                                        .fill(Color.white)
+                                        .frame(width: 28, height: 28)
+                                        .overlay(
+                                            Button(action: {
+                                                showPhotoActionSheet = true
+                                            }) {
+                                                Image(systemName: "camera.fill")
+                                                    .font(.system(size: 14, weight: .medium))
+                                                    .foregroundColor(.black.opacity(0.7))
+                                            }
+                                        )
+                                        .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                                        .offset(x: 30, y: 30)
+                                }
                             }
                             .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
-                            
-                            // Upload/Remove status
-                            if isUploadingImage {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                        .tint(.black.opacity(0.6))
-                                    Text("Uploading...")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.black.opacity(0.6))
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.black.opacity(0.05))
-                                .cornerRadius(16)
-                            } else if isRemovingImage {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                        .tint(.black.opacity(0.6))
-                                    Text("Removing...")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.black.opacity(0.6))
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.black.opacity(0.05))
-                                .cornerRadius(16)
-                            }
-                            
-                            // Upload/Remove result message
-                            if showUploadResult, let result = uploadResult {
-                                HStack(spacing: 6) {
-                                    Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(result.success ? .black.opacity(0.6) : .black.opacity(0.7))
-                                    Text(result.message)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.primary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.black.opacity(0.05))
-                                .cornerRadius(16)
-                                .transition(.scale.combined(with: .opacity))
-                            }
                         }
-                        
-                        // User Info Card - Clean minimal design
+                        .padding(.top, 32)
+                        // User Info Card
                         VStack(spacing: 24) {
                             Text(user.fullname)
                                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                                 .foregroundColor(.primary)
-                            
                             VStack(spacing: 20) {
                                 // Username row
                                 HStack(spacing: 16) {
@@ -172,7 +132,6 @@ struct ProfileView: View {
                                                 .font(.system(size: 18, weight: .medium))
                                                 .foregroundColor(.black.opacity(0.7))
                                         )
-                                    
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Username")
                                             .font(.system(size: 12, weight: .medium))
@@ -183,74 +142,11 @@ struct ProfileView: View {
                                             .font(.system(size: 16, weight: .medium))
                                             .foregroundColor(.primary)
                                     }
-                                    
-            Spacer()
-                                }
-                                
-                                // Subtle divider
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.05))
-                                    .frame(height: 1)
-                                
-                                // Email row
-                                HStack(spacing: 16) {
-                                    Circle()
-                                        .fill(Color.black.opacity(0.05))
-                                        .frame(width: 40, height: 40)
-                                        .overlay(
-                                            Image(systemName: "envelope")
-                                                .font(.system(size: 18, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.7))
-                                        )
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Email")
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundColor(.black.opacity(0.5))
-                                            .textCase(.uppercase)
-                                            .tracking(0.5)
-                                        Text(user.email)
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.primary)
-                                    }
-                                    
                                     Spacer()
-                                    
-                                    // Verification status - subtle design
-                                    if user.isEmailVerified {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.6))
-                                            Text("Verified")
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.6))
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(Color.black.opacity(0.05))
-                                        .cornerRadius(12)
-                                    } else {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "exclamationmark.circle")
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.6))
-                                            Text("Unverified")
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundColor(.black.opacity(0.6))
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(Color.black.opacity(0.05))
-                                        .cornerRadius(12)
-                                    }
                                 }
-                                
-                                // Subtle divider
                                 Rectangle()
                                     .fill(Color.black.opacity(0.05))
                                     .frame(height: 1)
-                                
                                 // Home City row
                                 HStack(spacing: 16) {
                                     Circle()
@@ -261,197 +157,152 @@ struct ProfileView: View {
                                                 .font(.system(size: 18, weight: .medium))
                                                 .foregroundColor(.black.opacity(0.7))
                                         )
-                                    
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Home City")
                                             .font(.system(size: 12, weight: .medium))
                                             .foregroundColor(.black.opacity(0.5))
                                             .textCase(.uppercase)
                                             .tracking(0.5)
-                                        
-                                        if isEditingHomeCity {
-                                            HStack(spacing: 8) {
-                                                TextField("Enter your city", text: $editedHomeCity)
-                                                    .font(.system(size: 16, weight: .medium))
-                                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                                    .textInputAutocapitalization(.words)
-                                                    .disableAutocorrection(true)
-                                                
-                                                if isUpdatingHomeCity {
-                                                    ProgressView()
-                                                        .scaleEffect(0.7)
-                                                        .tint(.black.opacity(0.6))
-                                                } else {
-                                                    HStack(spacing: 4) {
-                                                        Button("Save") {
-                                                            Task {
-                                                                await updateHomeCity()
-                                                            }
-                                                        }
-                                                        .font(.system(size: 12, weight: .medium))
-                                                        .foregroundColor(.blue)
-                                                        .disabled(editedHomeCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                                        
-                                                        Button("Cancel") {
-                                                            isEditingHomeCity = false
-                                                            editedHomeCity = user.homeCity ?? ""
-                                                        }
-                                                        .font(.system(size: 12, weight: .medium))
-                                                        .foregroundColor(.gray)
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            Text(user.homeCity?.isEmpty == false ? user.homeCity! : "Not set")
-                                                .font(.system(size: 16, weight: .medium))
-                                                .foregroundColor(user.homeCity?.isEmpty == false ? .primary : .black.opacity(0.4))
-                                        }
+                                        Text(user.homeCity?.isEmpty == false ? user.homeCity! : "Not set")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(user.homeCity?.isEmpty == false ? .primary : .black.opacity(0.4))
                                     }
-                                    
                                     Spacer()
-                                    
-                                    if !isEditingHomeCity {
-                                        Button("Edit") {
-                                            editedHomeCity = user.homeCity ?? ""
-                                            isEditingHomeCity = true
-                                        }
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.blue)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.blue.opacity(0.1))
-                                        .cornerRadius(8)
-                                    }
                                 }
                             }
+                            .padding(28)
+                            .background(Color.white)
+                            .cornerRadius(20)
+                            .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
                         }
-                        .padding(28)
-                        .background(Color.white)
-                        .cornerRadius(20)
-                        .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                }
-                
-                // Home city update result message
-                if showHomeCityUpdateResult, let result = homeCityUpdateResult {
-                    HStack {
-                        Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(result.success ? .black.opacity(0.7) : .black.opacity(0.7))
-                        Text(result.message)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.primary)
-                    }
-                    .padding()
-                    .background(Color.black.opacity(0.05))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 20)
-                    .transition(.scale.combined(with: .opacity))
-                }
-                
-                // Account deletion result message
-                if showDeleteResult, let result = deleteResult {
-                    HStack {
-                        Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundColor(result.success ? .black.opacity(0.7) : .black.opacity(0.7))
-                        Text(result.message)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.primary)
-                    }
-                    .padding()
-                    .background(Color.black.opacity(0.05))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 20)
-                    .transition(.scale.combined(with: .opacity))
-                }
-                
-                // Action Buttons Section - Clean design
-                VStack(spacing: 16) {
-                    // Change Password Button
-                    Button(action: {
-                        showChangePassword = true
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "key")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.black.opacity(0.7))
-                            Text("Change Password")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.black.opacity(0.3))
-                        }
-                        .padding(20)
-                        .background(Color.white)
-                        .cornerRadius(16)
-                        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
-                    }
-                    
-                    // Sign Out Button
-            Button(action: {
-                Task {
-                    await vm.signoutButtonPressed()
-                }
-            }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "arrow.right.square")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.black.opacity(0.7))
-                Text("Sign Out")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.black.opacity(0.3))
-                        }
-                        .padding(20)
-                        .background(Color.white)
-                        .cornerRadius(16)
-                        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
-                    }
-                    
-                    // Delete Account Button - Subtle design
-            Button(action: {
-                        showDeleteConfirmation = true
-                    }) {
-                        HStack(spacing: 12) {
-                            if isDeletingAccount {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .tint(.black.opacity(0.7))
-                            } else {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.7))
-                            }
-                            Text(isDeletingAccount ? "Deleting Account..." : "Delete Account")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.primary)
-                            Spacer()
-                            if !isDeletingAccount {
-                                Image(systemName: "chevron.right")
+                    // Only show editing and account actions for current user
+                    if isCurrentUser {
+                        // Home city update result message
+                        if showHomeCityUpdateResult, let result = homeCityUpdateResult {
+                            HStack {
+                                Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundColor(result.success ? .black.opacity(0.7) : .black.opacity(0.7))
+                                Text(result.message)
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.3))
+                                    .foregroundColor(.primary)
                             }
+                            .padding()
+                            .background(Color.black.opacity(0.05))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                            .transition(.scale.combined(with: .opacity))
                         }
-                        .padding(20)
-                        .background(Color.white)
-                        .cornerRadius(16)
-                        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+                        // Account deletion result message
+                        if showDeleteResult, let result = deleteResult {
+                            HStack {
+                                Image(systemName: result.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundColor(result.success ? .black.opacity(0.7) : .black.opacity(0.7))
+                                Text(result.message)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.primary)
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.05))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                        // Action Buttons Section - Clean design
+                        VStack(spacing: 16) {
+                            // Change Password Button
+                            Button(action: {
+                                showChangePassword = true
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "key")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.7))
+                                    Text("Change Password")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.3))
+                                }
+                                .padding(20)
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+                            }
+                            // Sign Out Button
+                            Button(action: {
+                                Task {
+                                    await vm.signoutButtonPressed()
+                                }
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "arrow.right.square")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.7))
+                                    Text("Sign Out")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.3))
+                                }
+                                .padding(20)
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+                            }
+                            // Delete Account Button
+                            Button(action: {
+                                showDeleteConfirmation = true
+                            }) {
+                                HStack(spacing: 12) {
+                                    if isDeletingAccount {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                            .tint(.black.opacity(0.7))
+                                    } else {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.black.opacity(0.7))
+                                    }
+                                    Text(isDeletingAccount ? "Deleting Account..." : "Delete Account")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    if !isDeletingAccount {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.black.opacity(0.3))
+                                    }
+                                }
+                                .padding(20)
+                                .background(Color.white)
+                                .cornerRadius(16)
+                                .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+                            }
+                            .disabled(isDeletingAccount)
+                        }
+                        .padding(.horizontal, 20)
                     }
-                    .disabled(isDeletingAccount)
                 }
-                .padding(.horizontal, 20)
-                
-                Spacer(minLength: 40)
             }
         }
         .background(Color(.systemGray6))
         .navigationTitle("Profile")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.blue)
+            }
+        }
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordView()
                 .environmentObject(vm)
@@ -487,7 +338,7 @@ struct ProfileView: View {
             isPresented: $showPhotoActionSheet,
             titleVisibility: .visible
         ) {
-            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+            if let user = displayUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
                 // User has a profile picture - show change and remove options
                 Button("Change Photo") {
                     showPhotoPicker = true
@@ -509,7 +360,7 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) { }
             }
         } message: {
-            if let user = vm.signedInUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
+            if let user = displayUser, let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
                 Text("Choose an option for your profile picture")
             } else {
                 Text("Add a profile picture to personalize your account")
@@ -534,7 +385,7 @@ struct ProfileView: View {
                 )
             }
         }
-        .onChange(of: vm.signedInUser?.profileImageUrl) { oldValue, newValue in
+        .onChange(of: displayUser?.profileImageUrl) { oldValue, newValue in
             // Force image refresh when profile URL changes
             if oldValue != newValue && newValue != nil {
                 imageRefreshId = UUID()

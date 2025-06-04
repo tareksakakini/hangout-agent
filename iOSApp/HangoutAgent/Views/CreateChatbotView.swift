@@ -33,6 +33,8 @@ struct CreateChatbotView: View {
     
     @State var timeZone: String = "America/Los_Angeles"
     
+    @State private var profileUser: User? = nil
+    
     var filteredUsers: [User] {
         if searchText.isEmpty {
             return []
@@ -166,6 +168,9 @@ struct CreateChatbotView: View {
                                                     } else {
                                                         selectedUsers.insert(user.username)
                                                     }
+                                                },
+                                                onViewProfile: {
+                                                    profileUser = user
                                                 }
                                             )
                                         }
@@ -454,6 +459,12 @@ struct CreateChatbotView: View {
         .onAppear {
             Task {
                 vm.users = await vm.getAllUsers()
+            }
+        }
+        .sheet(item: $profileUser) { user in
+            NavigationView {
+                ProfileView(user: user)
+                    .environmentObject(vm)
             }
         }
     }
