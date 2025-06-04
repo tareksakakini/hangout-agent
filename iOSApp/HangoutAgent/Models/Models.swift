@@ -69,6 +69,25 @@ struct Chatbot: Identifiable, Codable, Hashable {
     var id: String
     var name: String
     var subscribers: [String]
+    var schedules: ChatbotSchedules?
+}
+
+struct ChatbotSchedules: Codable, Hashable {
+    var availabilityMessageSchedule: AgentSchedule
+    var suggestionsSchedule: AgentSchedule  
+    var finalPlanSchedule: AgentSchedule
+}
+
+struct AgentSchedule: Codable, Hashable {
+    var dayOfWeek: Int // 0 = Sunday, 1 = Monday, etc.
+    var hour: Int // 0-23
+    var minute: Int // 0-59
+    var timeZone: String // e.g., "America/Los_Angeles"
+    
+    // Convert to cron format for Firebase Functions
+    var cronExpression: String {
+        return "\(minute) \(hour) * * \(dayOfWeek)"
+    }
 }
 
 struct HangoutGroup: Identifiable, Codable, Hashable {

@@ -67,9 +67,49 @@ async function sendMessagesToSubscribers() {
     const chatbotsSnapshot = await db.collection('chatbots').get();
     console.log(`Found ${chatbotsSnapshot.size} chatbots`);
 
+    // Get current time info
+    const now = new Date();
+    const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentHour = now.getUTCHours();
+    const currentMinute = now.getUTCMinutes();
+
     for (const chatbotDoc of chatbotsSnapshot.docs) {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
+
+      // Check if this chatbot should send availability messages now
+      if (chatbot.schedules && chatbot.schedules.availabilityMessageSchedule) {
+        const schedule = chatbot.schedules.availabilityMessageSchedule;
+        
+        // Create a date object representing the current time in the chatbot's timezone
+        const nowInTimezone = new Date().toLocaleString('en-US', {
+          timeZone: schedule.timeZone
+        });
+        const timezoneDate = new Date(nowInTimezone);
+        
+        // Get the current day, hour, and minute in the timezone
+        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentHour = timezoneDate.getHours();
+        const currentMinute = timezoneDate.getMinutes();
+        
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Check if current time matches schedule (exact minute match)
+        const isScheduledDay = currentDay === schedule.dayOfWeek;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+        
+        if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          continue;
+        }
+        
+        console.log(`Processing chatbot ${chatbot.name} - scheduled for availability messages now`);
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no availability schedule configured`);
+        continue;
+      }
 
       for (const subscriberUsername of chatbot.subscribers) {
         const usersSnapshot = await db.collection('users')
@@ -302,10 +342,50 @@ async function analyzeChatsAndSuggestOutings() {
     const chatbotsSnapshot = await db.collection('chatbots').get();
     console.log(`Found ${chatbotsSnapshot.size} chatbots`);
 
+    // Get current time info
+    const now = new Date();
+    const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentHour = now.getUTCHours();
+    const currentMinute = now.getUTCMinutes();
+
     for (const chatbotDoc of chatbotsSnapshot.docs) {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
       
+      // Check if this chatbot should send suggestions now
+      if (chatbot.schedules && chatbot.schedules.suggestionsSchedule) {
+        const schedule = chatbot.schedules.suggestionsSchedule;
+        
+        // Create a date object representing the current time in the chatbot's timezone
+        const nowInTimezone = new Date().toLocaleString('en-US', {
+          timeZone: schedule.timeZone
+        });
+        const timezoneDate = new Date(nowInTimezone);
+        
+        // Get the current day, hour, and minute in the timezone
+        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentHour = timezoneDate.getHours();
+        const currentMinute = timezoneDate.getMinutes();
+        
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Check if current time matches schedule (exact minute match)
+        const isScheduledDay = currentDay === schedule.dayOfWeek;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+        
+        if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          continue;
+        }
+        
+        console.log(`Processing chatbot ${chatbot.name} - scheduled for suggestions now`);
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no suggestions schedule configured`);
+        continue;
+      }
+
       console.log(`Fetching chats for chatbot: ${chatbot.id}`);
       const chatsSnapshot = await db.collection('chats')
         .where('chatbotId', '==', chatbot.id)
@@ -559,8 +639,50 @@ async function analyzeResponsesAndSendFinalPlan() {
   const db = admin.firestore();
   const chatbotsSnapshot = await db.collection('chatbots').get();
 
+  // Get current time info
+  const now = new Date();
+  const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+  const currentHour = now.getUTCHours();
+  const currentMinute = now.getUTCMinutes();
+
   for (const chatbotDoc of chatbotsSnapshot.docs) {
     const chatbot = chatbotDoc.data();
+    console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
+    
+    // Check if this chatbot should send final plan now
+    if (chatbot.schedules && chatbot.schedules.finalPlanSchedule) {
+      const schedule = chatbot.schedules.finalPlanSchedule;
+      
+      // Create a date object representing the current time in the chatbot's timezone
+      const nowInTimezone = new Date().toLocaleString('en-US', {
+        timeZone: schedule.timeZone
+      });
+      const timezoneDate = new Date(nowInTimezone);
+      
+      // Get the current day, hour, and minute in the timezone
+      const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const currentHour = timezoneDate.getHours();
+      const currentMinute = timezoneDate.getMinutes();
+      
+      console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+      console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+      
+      // Check if current time matches schedule (exact minute match)
+      const isScheduledDay = currentDay === schedule.dayOfWeek;
+      const isScheduledHour = currentHour === schedule.hour;
+      const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+      
+      if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
+        console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        continue;
+      }
+      
+      console.log(`Processing chatbot ${chatbot.name} - scheduled for final plan now`);
+    } else {
+      console.log(`Skipping chatbot ${chatbot.name} - no final plan schedule configured`);
+      continue;
+    }
+
     const chatsSnapshot = await db.collection('chats')
       .where('chatbotId', '==', chatbot.id)
       .get();
@@ -727,8 +849,8 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('24 12 * * 2')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => sendMessagesToSubscribers());
 
 exports.suggestWeekendOutings = functions
@@ -739,8 +861,8 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('27 12 * * 2')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
 exports.sendFinalPlan = functions
@@ -751,8 +873,8 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('30 12 * * 2')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
 exports.sendMessagesToSubscribers = sendMessagesToSubscribers;

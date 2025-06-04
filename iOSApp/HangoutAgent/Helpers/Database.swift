@@ -40,13 +40,35 @@ class DatabaseManager {
         }
     }
     
-    func addChatbotToFirestore(id: String, name: String, subscribers: [String]) async throws {
+    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules) async throws {
         let chatbotRef = db.collection("chatbots").document(id)
+        
+        let schedulesData: [String: Any] = [
+            "availabilityMessageSchedule": [
+                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek,
+                "hour": schedules.availabilityMessageSchedule.hour,
+                "minute": schedules.availabilityMessageSchedule.minute,
+                "timeZone": schedules.availabilityMessageSchedule.timeZone
+            ],
+            "suggestionsSchedule": [
+                "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek,
+                "hour": schedules.suggestionsSchedule.hour,
+                "minute": schedules.suggestionsSchedule.minute,
+                "timeZone": schedules.suggestionsSchedule.timeZone
+            ],
+            "finalPlanSchedule": [
+                "dayOfWeek": schedules.finalPlanSchedule.dayOfWeek,
+                "hour": schedules.finalPlanSchedule.hour,
+                "minute": schedules.finalPlanSchedule.minute,
+                "timeZone": schedules.finalPlanSchedule.timeZone
+            ]
+        ]
         
         let chatbotData: [String: Any] = [
             "id": id,
             "name": name,
             "subscribers": subscribers,
+            "schedules": schedulesData
         ]
         
         do {
@@ -101,7 +123,44 @@ class DatabaseManager {
                 else {
                     return nil
                 }
-                return Chatbot(id: id, name: name, subscribers: subscribers)
+                
+                // Parse schedules if they exist
+                var schedules: ChatbotSchedules? = nil
+                if let schedulesData = data["schedules"] as? [String: Any] {
+                    if let availabilityData = schedulesData["availabilityMessageSchedule"] as? [String: Any],
+                       let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
+                       let finalPlanData = schedulesData["finalPlanSchedule"] as? [String: Any] {
+                        
+                        let availabilitySchedule = AgentSchedule(
+                            dayOfWeek: availabilityData["dayOfWeek"] as? Int ?? 2,
+                            hour: availabilityData["hour"] as? Int ?? 10,
+                            minute: availabilityData["minute"] as? Int ?? 0,
+                            timeZone: availabilityData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        let suggestionsSchedule = AgentSchedule(
+                            dayOfWeek: suggestionsData["dayOfWeek"] as? Int ?? 4,
+                            hour: suggestionsData["hour"] as? Int ?? 14,
+                            minute: suggestionsData["minute"] as? Int ?? 0,
+                            timeZone: suggestionsData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        let finalPlanSchedule = AgentSchedule(
+                            dayOfWeek: finalPlanData["dayOfWeek"] as? Int ?? 5,
+                            hour: finalPlanData["hour"] as? Int ?? 16,
+                            minute: finalPlanData["minute"] as? Int ?? 0,
+                            timeZone: finalPlanData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        schedules = ChatbotSchedules(
+                            availabilityMessageSchedule: availabilitySchedule,
+                            suggestionsSchedule: suggestionsSchedule,
+                            finalPlanSchedule: finalPlanSchedule
+                        )
+                    }
+                }
+                
+                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules)
             }
         } catch {
             print("Error fetching chatbots: \(error.localizedDescription)")

@@ -102,11 +102,11 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func createChatbotButtonPressed(id: String, name: String, subscribers: [String], uid: String) async {
+    func createChatbotButtonPressed(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, uid: String) async {
         do {
             let firestoreService = DatabaseManager()
             
-            try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers)
+            try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules)
             
             for username in subscribers {
                 if let user = users.first(where: { $0.username == username }) {

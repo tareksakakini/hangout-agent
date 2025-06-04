@@ -260,6 +260,21 @@ struct CreateChatbotView: View {
     @State var selectedUsers: Set<String> = []
     @State var errorMessage: String?
     
+    // Scheduling state variables
+    @State var availabilityDay: Int = 2 // Default to Tuesday
+    @State var availabilityHour: Int = 10 // Default to 10 AM
+    @State var availabilityMinute: Int = 0
+    
+    @State var suggestionsDay: Int = 4 // Default to Thursday
+    @State var suggestionsHour: Int = 14 // Default to 2 PM
+    @State var suggestionsMinute: Int = 0
+    
+    @State var finalPlanDay: Int = 5 // Default to Friday
+    @State var finalPlanHour: Int = 16 // Default to 4 PM
+    @State var finalPlanMinute: Int = 0
+    
+    @State var timeZone: String = "America/Los_Angeles"
+    
     var filteredUsers: [User] {
         if searchText.isEmpty {
             return []
@@ -448,6 +463,165 @@ struct CreateChatbotView: View {
                             .background(Color.blue.opacity(0.05))
                             .cornerRadius(16)
                             
+                            // Scheduling section
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "clock")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(.blue)
+                                    Text("Agent Schedule")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                
+                                Text("Configure when your agent should send different types of messages")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                
+                                VStack(spacing: 16) {
+                                    // Availability Messages
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Ask for Availability")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                        
+                                        HStack(spacing: 12) {
+                                            Picker("Day", selection: $availabilityDay) {
+                                                Text("Sunday").tag(0)
+                                                Text("Monday").tag(1)
+                                                Text("Tuesday").tag(2)
+                                                Text("Wednesday").tag(3)
+                                                Text("Thursday").tag(4)
+                                                Text("Friday").tag(5)
+                                                Text("Saturday").tag(6)
+                                            }
+                                            .pickerStyle(MenuPickerStyle())
+                                            .frame(maxWidth: .infinity)
+                                            
+                                            HStack(spacing: 4) {
+                                                Picker("Hour", selection: $availabilityHour) {
+                                                    ForEach(0..<24) { hour in
+                                                        Text(String(format: "%02d", hour)).tag(hour)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                                
+                                                Text(":")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .foregroundColor(.primary)
+                                                
+                                                Picker("Minute", selection: $availabilityMinute) {
+                                                    ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { minute in
+                                                        Text(String(format: "%02d", minute)).tag(minute)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                    }
+                                    
+                                    // Suggestions
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Send Suggestions")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                        
+                                        HStack(spacing: 12) {
+                                            Picker("Day", selection: $suggestionsDay) {
+                                                Text("Sunday").tag(0)
+                                                Text("Monday").tag(1)
+                                                Text("Tuesday").tag(2)
+                                                Text("Wednesday").tag(3)
+                                                Text("Thursday").tag(4)
+                                                Text("Friday").tag(5)
+                                                Text("Saturday").tag(6)
+                                            }
+                                            .pickerStyle(MenuPickerStyle())
+                                            .frame(maxWidth: .infinity)
+                                            
+                                            HStack(spacing: 4) {
+                                                Picker("Hour", selection: $suggestionsHour) {
+                                                    ForEach(0..<24) { hour in
+                                                        Text(String(format: "%02d", hour)).tag(hour)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                                
+                                                Text(":")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .foregroundColor(.primary)
+                                                
+                                                Picker("Minute", selection: $suggestionsMinute) {
+                                                    ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { minute in
+                                                        Text(String(format: "%02d", minute)).tag(minute)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                    }
+                                    
+                                    // Final Plan
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Send Final Plan")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                        
+                                        HStack(spacing: 12) {
+                                            Picker("Day", selection: $finalPlanDay) {
+                                                Text("Sunday").tag(0)
+                                                Text("Monday").tag(1)
+                                                Text("Tuesday").tag(2)
+                                                Text("Wednesday").tag(3)
+                                                Text("Thursday").tag(4)
+                                                Text("Friday").tag(5)
+                                                Text("Saturday").tag(6)
+                                            }
+                                            .pickerStyle(MenuPickerStyle())
+                                            .frame(maxWidth: .infinity)
+                                            
+                                            HStack(spacing: 4) {
+                                                Picker("Hour", selection: $finalPlanHour) {
+                                                    ForEach(0..<24) { hour in
+                                                        Text(String(format: "%02d", hour)).tag(hour)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                                
+                                                Text(":")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .foregroundColor(.primary)
+                                                
+                                                Picker("Minute", selection: $finalPlanMinute) {
+                                                    ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { minute in
+                                                        Text(String(format: "%02d", minute)).tag(minute)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 65)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                    }
+                                }
+                            }
+                            .padding(16)
+                            .background(Color.orange.opacity(0.05))
+                            .cornerRadius(16)
+                            
                             // Error message
                             if let errorMessage = errorMessage {
                                 HStack(spacing: 8) {
@@ -534,7 +708,29 @@ struct CreateChatbotView: View {
                 var subscribers = Array(selectedUsers)
                 subscribers.append(user.username)
                 
-                await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, uid: user.id)
+                // Create schedules
+                let schedules = ChatbotSchedules(
+                    availabilityMessageSchedule: AgentSchedule(
+                        dayOfWeek: availabilityDay,
+                        hour: availabilityHour,
+                        minute: availabilityMinute,
+                        timeZone: timeZone
+                    ),
+                    suggestionsSchedule: AgentSchedule(
+                        dayOfWeek: suggestionsDay,
+                        hour: suggestionsHour,
+                        minute: suggestionsMinute,
+                        timeZone: timeZone
+                    ),
+                    finalPlanSchedule: AgentSchedule(
+                        dayOfWeek: finalPlanDay,
+                        hour: finalPlanHour,
+                        minute: finalPlanMinute,
+                        timeZone: timeZone
+                    )
+                )
+                
+                await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, schedules: schedules, uid: user.id)
                 vm.chatbots = await vm.getAllChatbots()
                 vm.signedInUser = await vm.getUser(uid: user.id)
                 dismiss()
