@@ -70,6 +70,8 @@ struct Chatbot: Identifiable, Codable, Hashable {
     var name: String
     var subscribers: [String]
     var schedules: ChatbotSchedules?
+    var creator: String // username of creator
+    var createdAt: Date
 }
 
 struct ChatbotSchedules: Codable, Hashable {

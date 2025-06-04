@@ -40,7 +40,7 @@ class DatabaseManager {
         }
     }
     
-    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules) async throws {
+    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, creator: String, createdAt: Date) async throws {
         let chatbotRef = db.collection("chatbots").document(id)
         
         let schedulesData: [String: Any] = [
@@ -68,7 +68,9 @@ class DatabaseManager {
             "id": id,
             "name": name,
             "subscribers": subscribers,
-            "schedules": schedulesData
+            "schedules": schedulesData,
+            "creator": creator,
+            "createdAt": Timestamp(date: createdAt)
         ]
         
         do {
@@ -119,11 +121,13 @@ class DatabaseManager {
                 guard
                     let id = data["id"] as? String,
                     let name = data["name"] as? String,
-                    let subscribers = data["subscribers"] as? [String]
+                    let subscribers = data["subscribers"] as? [String],
+                    let creator = data["creator"] as? String,
+                    let createdAtTimestamp = data["createdAt"] as? Timestamp
                 else {
                     return nil
                 }
-                
+                let createdAt = createdAtTimestamp.dateValue()
                 // Parse schedules if they exist
                 var schedules: ChatbotSchedules? = nil
                 if let schedulesData = data["schedules"] as? [String: Any] {
@@ -160,7 +164,7 @@ class DatabaseManager {
                     }
                 }
                 
-                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules)
+                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt)
             }
         } catch {
             print("Error fetching chatbots: \(error.localizedDescription)")
