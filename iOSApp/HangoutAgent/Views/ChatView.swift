@@ -72,6 +72,7 @@ struct ChatView: View {
             textbox
         }
         .navigationTitle(chatbot.name)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { showAgentInfo = true }) {

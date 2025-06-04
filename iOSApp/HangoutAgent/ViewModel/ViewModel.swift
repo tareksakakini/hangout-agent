@@ -856,4 +856,29 @@ class ViewModel: ObservableObject {
             return (false, error.localizedDescription)
         }
     }
+    
+    // MARK: - Group Deletion
+    func deleteGroup(groupId: String) async {
+        do {
+            let firestoreService = DatabaseManager()
+            let groupRef = firestoreService.db.collection("groups").document(groupId)
+
+            // Delete all messages in the group
+            let messagesSnapshot = try await groupRef.collection("messages").getDocuments()
+            for messageDoc in messagesSnapshot.documents {
+                try await messageDoc.reference.delete()
+            }
+
+            // Delete the group document
+            try await groupRef.delete()
+
+            // Remove group from local data
+            DispatchQueue.main.async {
+                self.groups.removeAll { $0.id == groupId }
+                self.groupMessages.removeValue(forKey: groupId)
+            }
+        } catch {
+            print("Error deleting group: \(error)")
+        }
+    }
 }
