@@ -25,6 +25,8 @@ struct SignupView: View {
     @State private var isCheckingUsername = false
     @State private var isUsernameTaken: Bool? = nil
     @FocusState private var usernameFieldIsFocused: Bool
+    @State private var showAlert = false
+    @State private var alertMessage = ""
     
     var body: some View {
         ZStack {
@@ -233,6 +235,36 @@ extension SignupView {
     private var SignUpButton: some View {
         Button {
             Task {
+                // Full name validation
+                if fullname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    alertMessage = "Full name cannot be empty."
+                    showAlert = true
+                    return
+                }
+                // Username validation
+                if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    alertMessage = "Username cannot be empty."
+                    showAlert = true
+                    return
+                }
+                // Home city validation
+                if homeCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    alertMessage = "Home city cannot be empty."
+                    showAlert = true
+                    return
+                }
+                // Email format validation
+                if !isValidEmail(email) {
+                    alertMessage = "Please enter a valid email address."
+                    showAlert = true
+                    return
+                }
+                // Password length validation
+                if password.count < 6 {
+                    alertMessage = "Password must be at least 6 characters."
+                    showAlert = true
+                    return
+                }
                 if isUsernameTaken == true {
                     return // Prevent sign up if taken
                 }
@@ -245,6 +277,10 @@ extension SignupView {
                             dismiss()
                         }
                     }
+                } else {
+                    // Check for email already in use (Firebase error message)
+                    alertMessage = "Sign up failed. This email may already be in use. Please use a different email or try signing in."
+                    showAlert = true
                 }
             }
         } label: {
@@ -259,5 +295,15 @@ extension SignupView {
         }
         .padding(.top, 8)
         .disabled(isUsernameTaken == true || isCheckingUsername)
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Sign Up Error"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+        }
+    }
+    
+    // Helper for email validation
+    private func isValidEmail(_ email: String) -> Bool {
+        let emailRegEx = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+        let emailPred = NSPredicate(format:"SELF MATCHES %@", emailRegEx)
+        return emailPred.evaluate(with: email)
     }
 }
