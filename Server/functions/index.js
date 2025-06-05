@@ -67,12 +67,6 @@ async function sendMessagesToSubscribers() {
     const chatbotsSnapshot = await db.collection('chatbots').get();
     console.log(`Found ${chatbotsSnapshot.size} chatbots`);
 
-    // Get current time info
-    const now = new Date();
-    const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
-    const currentHour = now.getUTCHours();
-    const currentMinute = now.getUTCMinutes();
-
     for (const chatbotDoc of chatbotsSnapshot.docs) {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
@@ -92,20 +86,70 @@ async function sendMessagesToSubscribers() {
         const currentHour = timezoneDate.getHours();
         const currentMinute = timezoneDate.getMinutes();
         
-        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        // Format current date as YYYY-MM-DD for comparison
+        const currentDateString = timezoneDate.toISOString().split('T')[0];
         
-        // Check if current time matches schedule (exact minute match)
-        const isScheduledDay = currentDay === schedule.dayOfWeek;
-        const isScheduledHour = currentHour === schedule.hour;
-        const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
         
-        if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
-          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        let shouldRun = false;
+        let executionKey = '';
+        
+        // Check if we should run based on specific date or day of week
+        if (schedule.specificDate) {
+          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Check if current date matches specific date and time
+          const isScheduledDate = currentDateString === schedule.specificDate;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_availability_${schedule.specificDate}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Legacy day-of-week scheduling
+          const isScheduledDay = currentDay === schedule.dayOfWeek;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_availability_${currentDateString}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else {
+          console.log(`Skipping chatbot ${chatbot.name} - no valid schedule configuration`);
+          continue;
+        }
+        
+        if (!shouldRun) {
+          continue;
+        }
+        
+        // Check if we've already executed this function for this chatbot today
+        const executionRef = db.collection('function_executions').doc(executionKey);
+        const executionDoc = await executionRef.get();
+        
+        if (executionDoc.exists) {
+          console.log(`Skipping chatbot ${chatbot.name} - availability function already executed for this date`);
           continue;
         }
         
         console.log(`Processing chatbot ${chatbot.name} - scheduled for availability messages now`);
+        
+        // Mark this execution as completed
+        await executionRef.set({
+          chatbotId: chatbot.id,
+          functionType: 'availability',
+          executedAt: admin.firestore.Timestamp.now(),
+          date: schedule.specificDate || currentDateString
+        });
       } else {
         console.log(`Skipping chatbot ${chatbot.name} - no availability schedule configured`);
         continue;
@@ -342,12 +386,6 @@ async function analyzeChatsAndSuggestOutings() {
     const chatbotsSnapshot = await db.collection('chatbots').get();
     console.log(`Found ${chatbotsSnapshot.size} chatbots`);
 
-    // Get current time info
-    const now = new Date();
-    const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
-    const currentHour = now.getUTCHours();
-    const currentMinute = now.getUTCMinutes();
-
     for (const chatbotDoc of chatbotsSnapshot.docs) {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
@@ -367,20 +405,70 @@ async function analyzeChatsAndSuggestOutings() {
         const currentHour = timezoneDate.getHours();
         const currentMinute = timezoneDate.getMinutes();
         
-        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        // Format current date as YYYY-MM-DD for comparison
+        const currentDateString = timezoneDate.toISOString().split('T')[0];
         
-        // Check if current time matches schedule (exact minute match)
-        const isScheduledDay = currentDay === schedule.dayOfWeek;
-        const isScheduledHour = currentHour === schedule.hour;
-        const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
         
-        if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
-          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        let shouldRun = false;
+        let executionKey = '';
+        
+        // Check if we should run based on specific date or day of week
+        if (schedule.specificDate) {
+          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Check if current date matches specific date and time
+          const isScheduledDate = currentDateString === schedule.specificDate;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_suggestions_${schedule.specificDate}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Legacy day-of-week scheduling
+          const isScheduledDay = currentDay === schedule.dayOfWeek;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_suggestions_${currentDateString}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else {
+          console.log(`Skipping chatbot ${chatbot.name} - no valid suggestions schedule configuration`);
+          continue;
+        }
+        
+        if (!shouldRun) {
+          continue;
+        }
+        
+        // Check if we've already executed this function for this chatbot today
+        const executionRef = db.collection('function_executions').doc(executionKey);
+        const executionDoc = await executionRef.get();
+        
+        if (executionDoc.exists) {
+          console.log(`Skipping chatbot ${chatbot.name} - suggestions function already executed for this date`);
           continue;
         }
         
         console.log(`Processing chatbot ${chatbot.name} - scheduled for suggestions now`);
+        
+        // Mark this execution as completed
+        await executionRef.set({
+          chatbotId: chatbot.id,
+          functionType: 'suggestions',
+          executedAt: admin.firestore.Timestamp.now(),
+          date: schedule.specificDate || currentDateString
+        });
       } else {
         console.log(`Skipping chatbot ${chatbot.name} - no suggestions schedule configured`);
         continue;
@@ -500,12 +588,7 @@ async function analyzeChatsAndSuggestOutings() {
         month: 'long', 
         day: 'numeric' 
       });
-      const nextSundayString = nextSunday.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
+      const nextSundayString = nextSunday.toISOString().split('T')[0];
       
       // Format dates for the event cards (YYYY-MM-DD format)
       const nextSaturdayFormatted = nextSaturday.toISOString().split('T')[0];
@@ -639,12 +722,6 @@ async function analyzeResponsesAndSendFinalPlan() {
   const db = admin.firestore();
   const chatbotsSnapshot = await db.collection('chatbots').get();
 
-  // Get current time info
-  const now = new Date();
-  const currentDayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
-  const currentHour = now.getUTCHours();
-  const currentMinute = now.getUTCMinutes();
-
   for (const chatbotDoc of chatbotsSnapshot.docs) {
     const chatbot = chatbotDoc.data();
     console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
@@ -664,20 +741,70 @@ async function analyzeResponsesAndSendFinalPlan() {
       const currentHour = timezoneDate.getHours();
       const currentMinute = timezoneDate.getMinutes();
       
-      console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: Day ${currentDay}, ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-      console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+      // Format current date as YYYY-MM-DD for comparison
+      const currentDateString = timezoneDate.toISOString().split('T')[0];
       
-      // Check if current time matches schedule (exact minute match)
-      const isScheduledDay = currentDay === schedule.dayOfWeek;
-      const isScheduledHour = currentHour === schedule.hour;
-      const isScheduledMinute = currentMinute === schedule.minute; // Exact minute match
+      console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
       
-      if (!isScheduledDay || !isScheduledHour || !isScheduledMinute) {
-        console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+      let shouldRun = false;
+      let executionKey = '';
+      
+      // Check if we should run based on specific date or day of week
+      if (schedule.specificDate) {
+        console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Check if current date matches specific date and time
+        const isScheduledDate = currentDateString === schedule.specificDate;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute;
+        
+        shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+        executionKey = `${chatbot.id}_finalplan_${schedule.specificDate}`;
+        
+        if (!shouldRun) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        }
+      } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Legacy day-of-week scheduling
+        const isScheduledDay = currentDay === schedule.dayOfWeek;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute;
+        
+        shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+        executionKey = `${chatbot.id}_finalplan_${currentDateString}`;
+        
+        if (!shouldRun) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        }
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no valid final plan schedule configuration`);
+        continue;
+      }
+      
+      if (!shouldRun) {
+        continue;
+      }
+      
+      // Check if we've already executed this function for this chatbot today
+      const executionRef = db.collection('function_executions').doc(executionKey);
+      const executionDoc = await executionRef.get();
+      
+      if (executionDoc.exists) {
+        console.log(`Skipping chatbot ${chatbot.name} - final plan function already executed for this date`);
         continue;
       }
       
       console.log(`Processing chatbot ${chatbot.name} - scheduled for final plan now`);
+      
+      // Mark this execution as completed
+      await executionRef.set({
+        chatbotId: chatbot.id,
+        functionType: 'finalplan',
+        executedAt: admin.firestore.Timestamp.now(),
+        date: schedule.specificDate || currentDateString
+      });
     } else {
       console.log(`Skipping chatbot ${chatbot.name} - no final plan schedule configured`);
       continue;
@@ -752,7 +879,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       temperature: 0.3
     });
 
-    const selectedIndex = parseInt(completion.choices[0].message.content.trim()) - 1;
+    let selectedIndex = parseInt(completion.choices[0].message.content.trim()) - 1;
     
     // Validate the selection
     if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= originalSuggestions.length) {

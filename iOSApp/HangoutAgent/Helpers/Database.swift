@@ -45,19 +45,22 @@ class DatabaseManager {
         
         let schedulesData: [String: Any] = [
             "availabilityMessageSchedule": [
-                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek,
+                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek as Any,
+                "specificDate": schedules.availabilityMessageSchedule.specificDate as Any,
                 "hour": schedules.availabilityMessageSchedule.hour,
                 "minute": schedules.availabilityMessageSchedule.minute,
                 "timeZone": schedules.availabilityMessageSchedule.timeZone
             ],
             "suggestionsSchedule": [
-                "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek,
+                "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek as Any,
+                "specificDate": schedules.suggestionsSchedule.specificDate as Any,
                 "hour": schedules.suggestionsSchedule.hour,
                 "minute": schedules.suggestionsSchedule.minute,
                 "timeZone": schedules.suggestionsSchedule.timeZone
             ],
             "finalPlanSchedule": [
-                "dayOfWeek": schedules.finalPlanSchedule.dayOfWeek,
+                "dayOfWeek": schedules.finalPlanSchedule.dayOfWeek as Any,
+                "specificDate": schedules.finalPlanSchedule.specificDate as Any,
                 "hour": schedules.finalPlanSchedule.hour,
                 "minute": schedules.finalPlanSchedule.minute,
                 "timeZone": schedules.finalPlanSchedule.timeZone
@@ -136,21 +139,24 @@ class DatabaseManager {
                        let finalPlanData = schedulesData["finalPlanSchedule"] as? [String: Any] {
                         
                         let availabilitySchedule = AgentSchedule(
-                            dayOfWeek: availabilityData["dayOfWeek"] as? Int ?? 2,
+                            dayOfWeek: availabilityData["dayOfWeek"] as? Int,
+                            specificDate: availabilityData["specificDate"] as? String,
                             hour: availabilityData["hour"] as? Int ?? 10,
                             minute: availabilityData["minute"] as? Int ?? 0,
                             timeZone: availabilityData["timeZone"] as? String ?? "America/Los_Angeles"
                         )
                         
                         let suggestionsSchedule = AgentSchedule(
-                            dayOfWeek: suggestionsData["dayOfWeek"] as? Int ?? 4,
+                            dayOfWeek: suggestionsData["dayOfWeek"] as? Int,
+                            specificDate: suggestionsData["specificDate"] as? String,
                             hour: suggestionsData["hour"] as? Int ?? 14,
                             minute: suggestionsData["minute"] as? Int ?? 0,
                             timeZone: suggestionsData["timeZone"] as? String ?? "America/Los_Angeles"
                         )
                         
                         let finalPlanSchedule = AgentSchedule(
-                            dayOfWeek: finalPlanData["dayOfWeek"] as? Int ?? 5,
+                            dayOfWeek: finalPlanData["dayOfWeek"] as? Int,
+                            specificDate: finalPlanData["specificDate"] as? String,
                             hour: finalPlanData["hour"] as? Int ?? 16,
                             minute: finalPlanData["minute"] as? Int ?? 0,
                             timeZone: finalPlanData["timeZone"] as? String ?? "America/Los_Angeles"

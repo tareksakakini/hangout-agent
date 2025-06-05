@@ -341,8 +341,13 @@ struct AgentInfoView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.primary)
                 HStack(spacing: 8) {
-                    Text(dayString(schedule.dayOfWeek))
-                        .font(.system(size: 14, weight: .medium))
+                    if let specificDate = schedule.specificDate {
+                        Text(formatDate(specificDate))
+                            .font(.system(size: 14, weight: .medium))
+                    } else if let dayOfWeek = schedule.dayOfWeek {
+                        Text(dayString(dayOfWeek))
+                            .font(.system(size: 14, weight: .medium))
+                    }
                     Text(String(format: "%02d:%02d", schedule.hour, schedule.minute))
                         .font(.system(size: 14, weight: .medium))
                     Text(schedule.timeZone)
@@ -355,6 +360,19 @@ struct AgentInfoView: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 4)
     }
+    
+    private func formatDate(_ dateString: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        
+        if let date = formatter.date(from: dateString) {
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: date)
+        }
+        
+        return dateString
+    }
+    
     private func dayString(_ day: Int) -> String {
         let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         return (0...6).contains(day) ? days[day] : "?"
