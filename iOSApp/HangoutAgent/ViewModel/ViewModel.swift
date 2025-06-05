@@ -108,10 +108,17 @@ class ViewModel: ObservableObject {
             let creator = users.first(where: { $0.id == uid })?.username ?? "unknown"
             let createdAt = Date()
             try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt)
-            for username in subscribers {
-                if let user = users.first(where: { $0.username == username }) {
-                    try await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
-                    _ = try await firestoreService.createChat(chatbotId: id, userId: user.id)
+            
+            // Run all Firestore calls in parallel for better performance
+            await withTaskGroup(of: Void.self) { group in
+                for username in subscribers {
+                    if let user = users.first(where: { $0.username == username }) {
+                        group.addTask {
+                            async let addSub = try? await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
+                            async let createChat = try? await firestoreService.createChat(chatbotId: id, userId: user.id)
+                            _ = await (addSub, createChat)
+                        }
+                    }
                 }
             }
         } catch {
@@ -371,29 +378,14 @@ class ViewModel: ObservableObject {
     }
 
     func startListeningToMessages(chatId: String) {
-        print("📱 Starting to listen to messages for chat: \(chatId)")
         // Remove existing listener if any
         stopListeningToMessages(chatId: chatId)
         
         let firestoreService = DatabaseManager()
         let listener = firestoreService.listenToMessages(chatId: chatId) { [weak self] messages in
-            print("📱 Received \(messages.count) messages update for chat: \(chatId)")
             DispatchQueue.main.async {
                 if let index = self?.chats.firstIndex(where: { $0.id == chatId }) {
-                    print("📱 Updating messages for chat at index: \(index)")
                     self?.chats[index].messages = messages
-                    print("📱 Updated messages count: \(messages.count)")
-                    
-                    // Log event cards if present
-                    let eventCards = messages.compactMap { $0.eventCard }
-                    if !eventCards.isEmpty {
-                        print("📋 Found \(eventCards.count) event cards in messages")
-                        for card in eventCards {
-                            print("📋 Event card for activity: \(card.activity)")
-                        }
-                    }
-                } else {
-                    print("❌ Could not find chat with id: \(chatId)")
                 }
             }
         }
@@ -401,7 +393,6 @@ class ViewModel: ObservableObject {
     }
 
     func stopListeningToMessages(chatId: String) {
-        print("📱 Stopping message listener for chat: \(chatId)")
         messageListeners[chatId]?.remove()
         messageListeners.removeValue(forKey: chatId)
     }
@@ -441,7 +432,6 @@ class ViewModel: ObservableObject {
             // Reload groups to update the UI
             await loadGroupsForUser()
             
-            print("✅ Successfully created group: \(name) with ID: \(groupId)")
             return true
             
         } catch {
@@ -468,11 +458,8 @@ class ViewModel: ObservableObject {
     
     func loadGroupsForUser() async {
         guard let user = signedInUser else { 
-            print("❌ No signed in user, cannot load groups")
             return 
         }
-        
-        print("📱 Loading groups for user: \(user.fullname) (ID: \(user.id))")
         
         do {
             let firestoreService = DatabaseManager()
@@ -481,16 +468,11 @@ class ViewModel: ObservableObject {
                 .whereField("participants", arrayContains: user.id)
                 .getDocuments()
             
-            print("📱 Found \(groupsSnapshot.documents.count) groups in Firestore")
-            
             var loadedGroups: [HangoutGroup] = []
             
             for groupDoc in groupsSnapshot.documents {
                 let data = groupDoc.data()
-                print("📱 Processing group document: \(groupDoc.documentID)")
-                print("📱 Group data: \(data)")
                 
-                let dateFormatter = DateFormatter()
                 let group = HangoutGroup(
                     id: data["id"] as? String ?? groupDoc.documentID,
                     name: data["name"] as? String ?? "Unnamed Group",
@@ -502,7 +484,6 @@ class ViewModel: ObservableObject {
                     updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
                 )
                 
-                print("📱 Created group object: \(group.name) with \(group.participants.count) participants")
                 loadedGroups.append(group)
             }
             
@@ -511,7 +492,6 @@ class ViewModel: ObservableObject {
             
             DispatchQueue.main.async {
                 self.groups = loadedGroups
-                print("📱 Updated UI with \(loadedGroups.count) groups")
                 
                 // Start listening to messages for each group
                 for group in loadedGroups {
@@ -565,7 +545,6 @@ class ViewModel: ObservableObject {
     }
     
     func startListeningToGroupMessages(groupId: String) {
-        print("📱 Starting to listen to group messages for group: \(groupId)")
         // Remove existing listener if any
         stopListeningToGroupMessages(groupId: groupId)
         
@@ -598,7 +577,6 @@ class ViewModel: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self?.groupMessages[groupId] = messages
-                    print("📱 Updated \(messages.count) group messages for group: \(groupId)")
                 }
             }
         
@@ -606,7 +584,6 @@ class ViewModel: ObservableObject {
     }
     
     func stopListeningToGroupMessages(groupId: String) {
-        print("📱 Stopping group message listener for group: \(groupId)")
         groupMessageListeners[groupId]?.remove()
         groupMessageListeners.removeValue(forKey: groupId)
     }
