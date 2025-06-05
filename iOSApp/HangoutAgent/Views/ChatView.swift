@@ -76,7 +76,7 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { showAgentInfo = true }) {
-                    Image(systemName: "info.circle")
+                    Image(systemName: "ellipsis")
                 }
             }
         }

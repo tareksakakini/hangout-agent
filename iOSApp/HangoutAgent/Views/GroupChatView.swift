@@ -40,7 +40,7 @@ struct GroupChatView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { showGroupInfo = true }) {
-                    Image(systemName: "info.circle")
+                    Image(systemName: "ellipsis")
                 }
             }
         }
@@ -177,6 +177,9 @@ struct GroupInfoView: View {
     var isProcessing: Bool = false
     var errorMessage: String? = nil
     @Environment(\.dismiss) var dismiss
+    
+    @State private var showLeaveConfirmation = false
+    @State private var showDeleteConfirmation = false
 
     var creatorUser: User? {
         // Assume the first participant is the creator (if you store creator info, use that)
@@ -408,7 +411,7 @@ struct GroupInfoView: View {
                                     .foregroundColor(.red)
                                     .font(.subheadline)
                             }
-                            Button(role: .destructive, action: onLeave) {
+                            Button(role: .destructive, action: { showLeaveConfirmation = true }) {
                                 if isProcessing {
                                     ProgressView()
                                         .frame(maxWidth: .infinity)
@@ -429,7 +432,7 @@ struct GroupInfoView: View {
                             .buttonStyle(.plain)
                             .disabled(isProcessing)
                             if isCreator {
-                                Button(role: .destructive, action: onDelete) {
+                                Button(role: .destructive, action: { showDeleteConfirmation = true }) {
                                     if isProcessing {
                                         ProgressView()
                                             .frame(maxWidth: .infinity)
@@ -463,6 +466,12 @@ struct GroupInfoView: View {
                     Button("Done") { dismiss() }
                         .disabled(isProcessing)
                 }
+            }
+            .confirmationDialog("Are you sure you want to leave this group?", isPresented: $showLeaveConfirmation) {
+                Button("Leave", role: .destructive) { onLeave() }
+            }
+            .confirmationDialog("Are you sure you want to delete this group?", isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) { onDelete() }
             }
         }
     }

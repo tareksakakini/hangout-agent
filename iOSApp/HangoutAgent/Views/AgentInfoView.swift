@@ -18,6 +18,9 @@ struct AgentInfoView: View {
     var isProcessing: Bool = false
     var errorMessage: String? = nil
     @Environment(\.dismiss) var dismiss
+    
+    @State private var showLeaveConfirmation = false
+    @State private var showDeleteConfirmation = false
 
     var creatorUser: User? {
         allUsers.first(where: { $0.username == chatbot.creator })
@@ -272,7 +275,7 @@ struct AgentInfoView: View {
                                     .foregroundColor(.red)
                                     .font(.subheadline)
                             }
-                            Button(role: .destructive, action: onLeave) {
+                            Button(role: .destructive, action: { showLeaveConfirmation = true }) {
                                 if isProcessing {
                                     ProgressView()
                                         .frame(maxWidth: .infinity)
@@ -293,7 +296,7 @@ struct AgentInfoView: View {
                             .buttonStyle(.plain)
                             .disabled(isProcessing)
                             if isCreator {
-                                Button(role: .destructive, action: onDelete) {
+                                Button(role: .destructive, action: { showDeleteConfirmation = true }) {
                                     if isProcessing {
                                         ProgressView()
                                             .frame(maxWidth: .infinity)
@@ -329,6 +332,12 @@ struct AgentInfoView: View {
                 }
             }
         }
+        .confirmationDialog("Are you sure you want to leave this agent?", isPresented: $showLeaveConfirmation) {
+            Button("Leave", role: .destructive) { onLeave() }
+        }
+        .confirmationDialog("Are you sure you want to delete this agent?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) { onDelete() }
+        }
     }
     private func scheduleRow(title: String, icon: String, schedule: AgentSchedule) -> some View {
         HStack(spacing: 12) {
@@ -350,9 +359,6 @@ struct AgentInfoView: View {
                     }
                     Text(String(format: "%02d:%02d", schedule.hour, schedule.minute))
                         .font(.system(size: 14, weight: .medium))
-                    Text(schedule.timeZone)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.secondary)
                 }
             }
             Spacer()

@@ -16,6 +16,7 @@ struct ProfileView: View {
     var user: User? = nil
     
     @State private var showDeleteConfirmation = false
+    @State private var showSignOutConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteResult: (success: Bool, message: String)? = nil
     @State private var showDeleteResult = false
@@ -151,6 +152,42 @@ struct ProfileView: View {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.05))
                                     .frame(height: 1)
+                                // Email row
+                                HStack(spacing: 16) {
+                                    Circle()
+                                        .fill(Color.black.opacity(0.05))
+                                        .frame(width: 40, height: 40)
+                                        .overlay(
+                                            Image(systemName: "envelope")
+                                                .font(.system(size: 18, weight: .medium))
+                                                .foregroundColor(.black.opacity(0.7))
+                                        )
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Email")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.black.opacity(0.5))
+                                            .textCase(.uppercase)
+                                            .tracking(0.5)
+                                        Text(user.email)
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.primary)
+                                    }
+                                    Spacer()
+                                    // Email verification status indicator
+                                    if isCurrentUser {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: user.isEmailVerified ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(user.isEmailVerified ? .green : .orange)
+                                            Text(user.isEmailVerified ? "Verified" : "Unverified")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(user.isEmailVerified ? .green : .orange)
+                                        }
+                                    }
+                                }
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.05))
+                                    .frame(height: 1)
                                 // Home City row
                                 HStack(spacing: 16) {
                                     Circle()
@@ -239,9 +276,7 @@ struct ProfileView: View {
                             }
                             // Sign Out Button
                             Button(action: {
-                                Task {
-                                    await vm.signoutButtonPressed()
-                                }
+                                showSignOutConfirmation = true
                             }) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "arrow.right.square")
@@ -310,6 +345,20 @@ struct ProfileView: View {
         .sheet(isPresented: $showChangePassword) {
             ChangePasswordView()
                 .environmentObject(vm)
+        }
+        .confirmationDialog(
+            "Sign Out",
+            isPresented: $showSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await vm.signoutButtonPressed()
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to sign out?")
         }
         .confirmationDialog(
             "Delete Account",
