@@ -484,4 +484,11 @@ class DatabaseManager {
             throw error
         }
     }
+    
+    // Check if username is taken
+    func isUsernameTaken(username: String) async throws -> Bool {
+        let usersRef = db.collection("users")
+        let querySnapshot = try await usersRef.whereField("username", isEqualTo: username).getDocuments()
+        return !querySnapshot.documents.isEmpty
+    }
 }

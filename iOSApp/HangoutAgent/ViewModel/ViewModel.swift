@@ -881,4 +881,15 @@ class ViewModel: ObservableObject {
             print("Error deleting group: \(error)")
         }
     }
+    
+    // Username uniqueness check
+    func isUsernameTaken(_ username: String) async -> Bool {
+        do {
+            let firestoreService = DatabaseManager()
+            return try await firestoreService.isUsernameTaken(username: username)
+        } catch {
+            print("Error checking username uniqueness: \(error)")
+            return false // Assume not taken on error
+        }
+    }
 }

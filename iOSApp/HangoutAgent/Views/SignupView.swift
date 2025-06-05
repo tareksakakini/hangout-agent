@@ -22,6 +22,9 @@ struct SignupView: View {
     @State var isPasswordVisible = false
     @State var user: User? = nil
     @State var showSuccessMessage = false
+    @State private var isCheckingUsername = false
+    @State private var isUsernameTaken: Bool? = nil
+    @FocusState private var usernameFieldIsFocused: Bool
     
     var body: some View {
         ZStack {
@@ -119,12 +122,69 @@ extension SignupView {
     }
     
     private var UsernameField: some View {
-        TextField("Username", text: $username)
-            .padding()
-            .background(Color(.systemGray5))
-            .cornerRadius(10)
-            .textInputAutocapitalization(.never)
-            .disableAutocorrection(true)
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .trailing) {
+                TextField("Username", text: $username)
+                    .padding(.trailing, 36) // Add right padding for icon
+                    .padding()
+                    .background(Color(.systemGray5))
+                    .cornerRadius(10)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .focused($usernameFieldIsFocused)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                usernameFieldIsFocused ? (isUsernameTaken == true ? Color.red : (isUsernameTaken == false && !username.isEmpty ? Color.green : Color.clear)) : Color.clear,
+                                lineWidth: 2
+                            )
+                    )
+                    .onChange(of: username) { newValue in
+                        isUsernameTaken = nil
+                        if newValue.isEmpty { return }
+                        isCheckingUsername = true
+                        // Debounce: wait 0.5s after last change
+                        let currentUsername = newValue
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            if username == currentUsername {
+                                Task {
+                                    let taken = await vm.isUsernameTaken(currentUsername)
+                                    DispatchQueue.main.async {
+                                        isUsernameTaken = taken
+                                        isCheckingUsername = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                if usernameFieldIsFocused {
+                    if isCheckingUsername {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .padding(.trailing, 12)
+                    } else if isUsernameTaken == true {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.red)
+                            .padding(.trailing, 12)
+                    } else if isUsernameTaken == false && !username.isEmpty {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .padding(.trailing, 12)
+                    }
+                }
+            }
+            if usernameFieldIsFocused {
+                if isUsernameTaken == true {
+                    Text("Username is already taken")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                } else if isUsernameTaken == false && !username.isEmpty {
+                    Text("Username is available")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+            }
+        }
     }
     
     private var EmailField: some View {
@@ -173,14 +233,16 @@ extension SignupView {
     private var SignUpButton: some View {
         Button {
             Task {
+                if isUsernameTaken == true {
+                    return // Prevent sign up if taken
+                }
                 if let signedUpUser = await vm.signupButtonPressed(fullname: fullname, username: username, email: email, password: password, homeCity: homeCity) {
                     DispatchQueue.main.async {
                         vm.signedInUser = signedUpUser
                         showSuccessMessage = true
-                        
                         // Auto-dismiss after 2 seconds
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        dismiss()
+                            dismiss()
                         }
                     }
                 }
@@ -190,11 +252,12 @@ extension SignupView {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.blue)
+                .background((isUsernameTaken == true || isCheckingUsername) ? Color.gray : Color.blue)
                 .foregroundColor(.white)
                 .cornerRadius(12)
                 .shadow(radius: 5)
         }
         .padding(.top, 8)
+        .disabled(isUsernameTaken == true || isCheckingUsername)
     }
 }
