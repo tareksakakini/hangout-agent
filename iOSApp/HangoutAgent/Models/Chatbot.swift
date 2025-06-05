@@ -15,4 +15,6 @@ struct Chatbot: Identifiable, Codable, Hashable {
     var schedules: ChatbotSchedules?
     var creator: String // username of creator
     var createdAt: Date
+    var planningStartDate: Date? // Start of the date range for planning
+    var planningEndDate: Date? // End of the date range for planning
 }

@@ -34,16 +34,30 @@ func formatPrompt(inputRequest: String, chatbot: Chatbot, allUsers: [User], curr
         """
     }.joined(separator: "\n\n")
 
+    // Format date range for planning
+    let dateFormatter = DateFormatter()
+    dateFormatter.dateStyle = .medium
+    
+    let dateRangeText: String
+    if let startDate = chatbot.planningStartDate, let endDate = chatbot.planningEndDate {
+        let startDateString = dateFormatter.string(from: startDate)
+        let endDateString = dateFormatter.string(from: endDate)
+        dateRangeText = "Planning Date Range: \(startDateString) to \(endDateString)"
+    } else {
+        dateRangeText = "Planning for the upcoming weekend"
+    }
+
     return """
     YOUR ROLE:
     
-    You are a friendly and helpful AI assistant coordinating weekend hangouts for a group of friends. Your goal is to gather information about availability and preferences for weekend planning. Your goal is not to suggest options.
+    You are a friendly and helpful AI assistant coordinating hangouts for a group of friends. Your goal is to gather information about availability and preferences for the specified planning period. Your goal is not to suggest options.
 
     Group Members: [\(fullNames)]
     Usernames: [\(usernames)]
+    \(dateRangeText)
 
     Your job is to:
-    1. Gather availability information for the upcoming weekend
+    1. Gather availability information for the specified date range
     2. Collect preferences about:
        - Preferred timing (morning, afternoon, evening, or specific times)
        - Location preferences or constraints
@@ -54,6 +68,7 @@ func formatPrompt(inputRequest: String, chatbot: Chatbot, allUsers: [User], curr
     2. Ask one question at a time to avoid overwhelming users
     3. Don't be pushy - if a user does not express any preferences, wrap up the conversation and inform the user that they can share any preferences at any time in the future
     4. Acknowledge and validate preferences
+    5. Reference the specific date range when asking about availability
     
     RESPONSE FORMAT:
     

@@ -40,7 +40,7 @@ class DatabaseManager {
         }
     }
     
-    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, creator: String, createdAt: Date) async throws {
+    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, creator: String, createdAt: Date, planningStartDate: Date? = nil, planningEndDate: Date? = nil) async throws {
         let chatbotRef = db.collection("chatbots").document(id)
         
         let schedulesData: [String: Any] = [
@@ -67,7 +67,7 @@ class DatabaseManager {
             ]
         ]
         
-        let chatbotData: [String: Any] = [
+        var chatbotData: [String: Any] = [
             "id": id,
             "name": name,
             "subscribers": subscribers,
@@ -75,6 +75,14 @@ class DatabaseManager {
             "creator": creator,
             "createdAt": Timestamp(date: createdAt)
         ]
+        
+        // Add planning date range if provided
+        if let startDate = planningStartDate {
+            chatbotData["planningStartDate"] = Timestamp(date: startDate)
+        }
+        if let endDate = planningEndDate {
+            chatbotData["planningEndDate"] = Timestamp(date: endDate)
+        }
         
         do {
             try await chatbotRef.setData(chatbotData)
@@ -170,7 +178,11 @@ class DatabaseManager {
                     }
                 }
                 
-                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt)
+                // Parse planning date range if available
+                let planningStartDate = (data["planningStartDate"] as? Timestamp)?.dateValue()
+                let planningEndDate = (data["planningEndDate"] as? Timestamp)?.dateValue()
+                
+                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
             }
         } catch {
             print("Error fetching chatbots: \(error.localizedDescription)")

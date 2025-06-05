@@ -102,12 +102,12 @@ class ViewModel: ObservableObject {
         }
     }
     
-    func createChatbotButtonPressed(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, uid: String) async {
+    func createChatbotButtonPressed(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, uid: String, planningStartDate: Date? = nil, planningEndDate: Date? = nil) async {
         do {
             let firestoreService = DatabaseManager()
             let creator = users.first(where: { $0.id == uid })?.username ?? "unknown"
             let createdAt = Date()
-            try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt)
+            try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
             
             // Run all Firestore calls in parallel for better performance
             await withTaskGroup(of: Void.self) { group in

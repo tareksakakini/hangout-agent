@@ -33,6 +33,10 @@ struct CreateChatbotView: View {
     
     @State var timeZone: String = "America/Los_Angeles"
     
+    // Date range for planning
+    @State var planningStartDate: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State var planningEndDate: Date = Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date()
+    
     @State private var profileUser: User? = nil
     
     var filteredUsers: [User] {
@@ -98,6 +102,12 @@ struct CreateChatbotView: View {
                                 onRemove: { username in
                                     selectedUsers.remove(username)
                                 }
+                            )
+                            
+                            // Date range section
+                            DateRangeSection(
+                                planningStartDate: $planningStartDate,
+                                planningEndDate: $planningEndDate
                             )
                             
                             // Scheduling section
@@ -190,7 +200,7 @@ struct CreateChatbotView: View {
                     )
                 )
                 
-                await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, schedules: schedules, uid: user.id)
+                await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, schedules: schedules, uid: user.id, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
                 vm.chatbots = await vm.getAllChatbots()
                 vm.signedInUser = await vm.getUser(uid: user.id)
                 dismiss()

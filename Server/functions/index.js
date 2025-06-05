@@ -168,16 +168,34 @@ async function sendMessagesToSubscribers() {
 
         let aiMessage;
         try {
+          // Format date range for the prompt
+          let dateRangeText = "this weekend";
+          if (chatbot.planningStartDate && chatbot.planningEndDate) {
+            const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+            const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+            const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+            const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+            
+            if (startDate.getFullYear() !== endDate.getFullYear()) {
+              // Include year if they're different
+              const startWithYear = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+              const endWithYear = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+              dateRangeText = `between ${startWithYear} and ${endWithYear}`;
+            } else {
+              dateRangeText = `between ${startDateString} and ${endDateString}`;
+            }
+          }
+
           const completion = await openai.chat.completions.create({
             model: "gpt-4",
             messages: [
               {
                 role: "system",
-                content: "You are a friendly and casual AI helping a group of friends coordinate weekend hangouts."
+                content: "You are a friendly and casual AI helping a group of friends coordinate hangouts for a specific time period."
               },
               {
                 role: "user",
-                content: `Write a message addressed to ${firstName}, asking about their availability for this weekend. Make it sound natural, upbeat, and brief. Invite them to suggest activities, locations, or timing preferences.`
+                content: `Write a message addressed to ${firstName}, asking about their availability for ${dateRangeText}. Make it sound natural, upbeat, and brief. Invite them to suggest activities, locations, or timing preferences.`
               }
             ],
             temperature: 0.8
@@ -232,7 +250,7 @@ async function sendMessagesToSubscribers() {
   }
 }
 
-async function checkUserAvailability(messages) {
+async function checkUserAvailability(messages, dateRangeText = "the planned dates") {
   try {
     const formattedMessages = messages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
     
@@ -241,11 +259,11 @@ async function checkUserAvailability(messages) {
       messages: [
         {
           role: "system",
-          content: "You analyze conversations and determine if a user has indicated they are not available for the weekend plans. Return ONLY 'available' or 'not available' based on your analysis."
+          content: "You analyze conversations and determine if a user has indicated they are not available for the planned hangout dates. Return ONLY 'available' or 'not available' based on your analysis."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for the weekend hangout?`
+          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for ${dateRangeText}?`
         }
       ],
       temperature: 0.1
@@ -501,7 +519,7 @@ async function analyzeChatsAndSuggestOutings() {
         // Check if user is available based on their messages
         console.log(`Checking availability for user: ${userId}`);
         try {
-          const isUnavailable = await checkUserAvailability(messages);
+          const isUnavailable = await checkUserAvailability(messages, dateRangeText);
           if (isUnavailable) {
             unavailableUserIds.push(userId);
             console.log(`User ${userId} indicated they are not available`);
@@ -554,52 +572,71 @@ async function analyzeChatsAndSuggestOutings() {
         console.log(`Location context for OpenAI: ${locationContext}`);
       }
 
-      // Get current date information for accurate weekend date suggestions
-      const now = new Date();
-      const currentDateString = now.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      const currentDayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      // Format date range for the prompt
+      let dateRangeText = "the upcoming weekend";
+      let dateContext = '';
       
-      // Calculate next weekend dates
-      let daysUntilSaturday = (6 - currentDayOfWeek) % 7;
-      let daysUntilSunday = (7 - currentDayOfWeek) % 7;
-      
-      // If it's already weekend, get next weekend
-      if (currentDayOfWeek === 0) { // Sunday
-        daysUntilSaturday = 6;
-        daysUntilSunday = 7;
-      } else if (currentDayOfWeek === 6) { // Saturday
-        daysUntilSaturday = 7;
-        daysUntilSunday = 1;
-      }
-      
-      const nextSaturday = new Date(now);
-      nextSaturday.setDate(now.getDate() + daysUntilSaturday);
-      const nextSunday = new Date(now);
-      nextSunday.setDate(now.getDate() + daysUntilSunday);
-      
-      const nextSaturdayString = nextSaturday.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      const nextSundayString = nextSunday.toISOString().split('T')[0];
-      
-      // Format dates for the event cards (YYYY-MM-DD format)
-      const nextSaturdayFormatted = nextSaturday.toISOString().split('T')[0];
-      const nextSundayFormatted = nextSunday.toISOString().split('T')[0];
-      
-      const dateContext = `\n\nCurrent date: ${currentDateString}
+      if (chatbot.planningStartDate && chatbot.planningEndDate) {
+        const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+        const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+        
+        const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        
+        // Format for YYYY-MM-DD
+        const startDateFormatted = startDate.toISOString().split('T')[0];
+        const endDateFormatted = endDate.toISOString().split('T')[0];
+        
+        dateRangeText = `${startDateString} to ${endDateString}`;
+        
+        dateContext = `\n\nPlanning Date Range: ${startDateString} to ${endDateString}
+Date Format Instructions:
+- Use dates between ${startDateFormatted} and ${endDateFormatted} (YYYY-MM-DD format)
+- Distribute suggestions across the available dates in this range
+- Consider different days within the range for variety`;
+      } else {
+        // Fallback to weekend logic for legacy chatbots
+        const now = new Date();
+        const currentDateString = now.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        const currentDayOfWeek = now.getDay();
+        
+        let daysUntilSaturday = (6 - currentDayOfWeek) % 7;
+        let daysUntilSunday = (7 - currentDayOfWeek) % 7;
+        
+        if (currentDayOfWeek === 0) { // Sunday
+          daysUntilSaturday = 6;
+          daysUntilSunday = 7;
+        } else if (currentDayOfWeek === 6) { // Saturday
+          daysUntilSaturday = 7;
+          daysUntilSunday = 1;
+        }
+        
+        const nextSaturday = new Date(now);
+        nextSaturday.setDate(now.getDate() + daysUntilSaturday);
+        const nextSunday = new Date(now);
+        nextSunday.setDate(now.getDate() + daysUntilSunday);
+        
+        const nextSaturdayString = nextSaturday.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        const nextSundayFormatted = nextSunday.toISOString().split('T')[0];
+        const nextSaturdayFormatted = nextSaturday.toISOString().split('T')[0];
+        
+        dateContext = `\n\nCurrent date: ${currentDateString}
 Next Weekend Dates:
 - Saturday: ${nextSaturdayString} (use ${nextSaturdayFormatted} in Date field)
-- Sunday: ${nextSundayString} (use ${nextSundayFormatted} in Date field)
+- Sunday: ${nextSunday.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (use ${nextSundayFormatted} in Date field)
 
 Please use these exact dates in your suggestions and vary between Saturday and Sunday events.`;
+      }
       
       console.log(`Date context for OpenAI: ${dateContext}`);
 
@@ -615,11 +652,11 @@ Please use these exact dates in your suggestions and vary between Saturday and S
           messages: [
             {
               role: "system",
-              content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. For each suggestion, include activity, specific location with address, date (use the exact dates provided), specific start and end times. When subscriber locations are provided, prioritize activities in or accessible from those areas. IMPORTANT: Use the exact date format provided (YYYY-MM-DD) in the Date field."
+              content: "You are a helpful assistant that analyzes group chat conversations and suggests outing options for a specified date range. For each suggestion, include activity, specific location with address, date (use the exact dates provided), specific start and end times. When subscriber locations are provided, prioritize activities in or accessible from those areas. IMPORTANT: Use the exact date format provided (YYYY-MM-DD) in the Date field."
             },
             {
               role: "user",
-              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}${locationContext}${dateContext}\n\nBased on this conversation, subscriber locations, and the current date context, suggest 5 outing options for the upcoming weekend. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date (use YYYY-MM-DD format), Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
+              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}${locationContext}${dateContext}\n\nBased on this conversation, subscriber locations, and the date context, suggest 5 outing options for ${dateRangeText}. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date (use YYYY-MM-DD format), Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
             }
           ],
           temperature: 0.8
@@ -674,7 +711,7 @@ Please use these exact dates in your suggestions and vary between Saturday and S
             console.log(`Sending intro message to ${user.fullname}`);
             const introMessage = {
               id: admin.firestore.Timestamp.now().toMillis().toString(),
-              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for the weekend:`,
+              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for ${dateRangeText}:`,
               senderId: chatbot.id,
               timestamp: admin.firestore.Timestamp.now(),
               side: 'bot'
@@ -697,7 +734,7 @@ Please use these exact dates in your suggestions and vary between Saturday and S
             // Update the chat's last message
             console.log(`Updating last message for chat ${chatDoc.id}`);
             await chatDoc.ref.update({
-              lastMessage: `${eventCards.length} weekend suggestions`,
+              lastMessage: `${eventCards.length} suggestions for ${dateRangeText}`,
               updatedAt: admin.firestore.Timestamp.now()
             });
             console.log(`Successfully sent suggestions to ${user.fullname}`);
@@ -820,6 +857,23 @@ async function analyzeResponsesAndSendFinalPlan() {
     let availableUserIds = [];
     let originalSuggestions = [];
     
+    // Format date range for availability checking
+    let dateRangeText = "the upcoming weekend";
+    if (chatbot.planningStartDate && chatbot.planningEndDate) {
+      const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+      const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+      const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      
+      if (startDate.getFullYear() !== endDate.getFullYear()) {
+        const startWithYear = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const endWithYear = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        dateRangeText = `${startWithYear} to ${endWithYear}`;
+      } else {
+        dateRangeText = `${startDateString} to ${endDateString}`;
+      }
+    }
+    
     // First pass to identify which users are unavailable and collect names of available users
     for (const chatDoc of chatsSnapshot.docs) {
       const userId = chatDoc.data().userId;
@@ -830,7 +884,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       const messages = messagesSnapshot.docs.map(doc => doc.data());
       
       // Check if user is available based on their messages
-      const isUnavailable = await checkUserAvailability(messages);
+      const isUnavailable = await checkUserAvailability(messages, dateRangeText);
       
       const userDoc = await db.collection('users').doc(userId).get();
       const user = userDoc.data();
@@ -869,11 +923,11 @@ async function analyzeResponsesAndSendFinalPlan() {
       messages: [
         {
           role: "system",
-          content: "You analyze group chat conversations to select the most popular weekend plan from the original suggestions. You must choose exactly one of the numbered options provided. Look for explicit preferences (e.g., 'I like option 1' or 'the first one sounds good') and implicit preferences in the conversation."
+          content: "You analyze group chat conversations to select the most popular plan from the original suggestions for the specified date range. You must choose exactly one of the numbered options provided. Look for explicit preferences (e.g., 'I like option 1' or 'the first one sounds good') and implicit preferences in the conversation."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nOriginal suggestions (numbered for reference):\n${formattedSuggestions}\n\nBased on the conversation, which option (1-${originalSuggestions.length}) is most preferred by the group? Return ONLY the number of your selection (e.g., '1' or '2').`
+          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nPlanning period: ${dateRangeText}\n\nOriginal suggestions (numbered for reference):\n${formattedSuggestions}\n\nBased on the conversation, which option (1-${originalSuggestions.length}) is most preferred by the group for ${dateRangeText}? Return ONLY the number of your selection (e.g., '1' or '2').`
         }
       ],
       temperature: 0.3
