@@ -43,9 +43,14 @@ class ViewModel: ObservableObject {
     func signupButtonPressed(fullname: String, username: String, email: String, password: String, homeCity: String? = nil) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
+            
+            // Automatically detect user's timezone
+            let userTimezone = TimezoneHelper.getCurrentTimezone()
+            print("🌍 Detected user timezone: \(userTimezone)")
+            
             let firestoreService = DatabaseManager()
-            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity)
-            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity)
+            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity, timezone: userTimezone)
+            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity, timezone: userTimezone)
             print("📧 Account created successfully! Please check your email to verify your account.")
             return user
         } catch {
@@ -754,6 +759,32 @@ class ViewModel: ObservableObject {
             return (true, nil)
         } catch {
             print("Error updating home city: \(error)")
+            return (false, error.localizedDescription)
+        }
+    }
+    
+    func updateTimezone(timezone: String) async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        // Validate timezone
+        guard TimezoneHelper.isValidTimezone(timezone) else {
+            return (false, "Invalid timezone identifier")
+        }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            try await firestoreService.updateUserTimezone(uid: user.id, timezone: timezone)
+            
+            // Update local user object
+            DispatchQueue.main.async {
+                self.signedInUser?.timezone = timezone
+            }
+            
+            return (true, nil)
+        } catch {
+            print("Error updating timezone: \(error)")
             return (false, error.localizedDescription)
         }
     }

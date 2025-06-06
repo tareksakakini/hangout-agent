@@ -11,8 +11,6 @@ const openai = new OpenAI({
 
 // Function to generate the system prompt
 async function generateSystemPrompt(chatId) {
-  const today = new Date().toISOString().split('T')[0];
-  const currentTime = new Date().toLocaleTimeString();
   const chatDoc = await db.collection('chats').doc(chatId).get();
   const chatData = chatDoc.data();
   if (!chatData) {
@@ -44,8 +42,20 @@ async function generateSystemPrompt(chatId) {
   }
   const userName = userData.fullname;
   const userUsername = userData.username;
+  const userTimezone = userData.timezone || 'UTC'; // Default to UTC if no timezone stored
 
   console.log(`User data:`, userData);
+  console.log(`User timezone: ${userTimezone}`);
+
+  // Generate date and time in user's timezone
+  const now = new Date();
+  const today = now.toLocaleDateString('en-CA', { timeZone: userTimezone }); // YYYY-MM-DD format
+  const currentTime = now.toLocaleTimeString('en-US', { 
+    timeZone: userTimezone,
+    hour12: true,
+    hour: 'numeric',
+    minute: '2-digit'
+  });
 
   // Fetch details of users subscribed to this chatbot
   const groupMembers = [];
@@ -151,7 +161,7 @@ async function generateSystemPrompt(chatId) {
   const formattedChatHistory = Object.entries(chatHistoryByUser)
     .map(([userName, messages]) => {
       const messageList = messages
-        .map(msg => `  [${msg.timestamp.toLocaleString()}] ${msg.sender}: ${msg.text}`)
+        .map(msg => `  [${msg.timestamp.toLocaleString('en-US', { timeZone: userTimezone })}] ${msg.sender}: ${msg.text}`)
         .join('\n');
       return `${userName}'s conversation:\n${messageList}`;
     })

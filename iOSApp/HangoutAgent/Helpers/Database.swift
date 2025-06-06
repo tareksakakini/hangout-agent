@@ -14,7 +14,7 @@ class DatabaseManager {
     
     // MARK: - Add Functions
     
-    func addUserToFirestore(uid: String, fullname: String, username: String, email: String, homeCity: String? = nil) async throws {
+    func addUserToFirestore(uid: String, fullname: String, username: String, email: String, homeCity: String? = nil, timezone: String? = nil) async throws {
         let userRef = db.collection("users").document(uid)
         
         var userData: [String: Any] = [
@@ -29,6 +29,11 @@ class DatabaseManager {
         // Add homeCity if provided
         if let homeCity = homeCity, !homeCity.isEmpty {
             userData["homeCity"] = homeCity
+        }
+        
+        // Add timezone if provided
+        if let timezone = timezone, !timezone.isEmpty {
+            userData["timezone"] = timezone
         }
         
         do {
@@ -499,6 +504,20 @@ class DatabaseManager {
             print("✅ Home city updated successfully!")
         } catch {
             print("❌ Error updating home city: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func updateUserTimezone(uid: String, timezone: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "timezone": timezone
+            ])
+            print("✅ User timezone updated successfully!")
+        } catch {
+            print("❌ Error updating user timezone: \(error.localizedDescription)")
             throw error
         }
     }
