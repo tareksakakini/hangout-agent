@@ -30,6 +30,8 @@ async function generateSystemPrompt(chatId) {
   }
   const chatbotName = chatbotData.name;
   const subscribers = chatbotData.subscribers || [];
+  const planningStartDate = chatbotData.planningStartDate;
+  const planningEndDate = chatbotData.planningEndDate;
 
   console.log(`Chatbot data:`, chatbotData);
   console.log(`Subscribers:`, subscribers);
@@ -56,6 +58,39 @@ async function generateSystemPrompt(chatId) {
     hour: 'numeric',
     minute: '2-digit'
   });
+
+  // Format planning date range in user's timezone
+  let planningDateRange = 'No specific date range set';
+  if (planningStartDate && planningEndDate) {
+    const startDate = planningStartDate.toDate();
+    const endDate = planningEndDate.toDate();
+    
+    const formattedStartDate = startDate.toLocaleDateString('en-US', { 
+      timeZone: userTimezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    
+    const formattedEndDate = endDate.toLocaleDateString('en-US', { 
+      timeZone: userTimezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    
+    if (startDate.toDateString() === endDate.toDateString()) {
+      // Same day
+      planningDateRange = formattedStartDate;
+    } else {
+      // Date range
+      planningDateRange = `${formattedStartDate} through ${formattedEndDate}`;
+    }
+  }
+
+  console.log(`Planning date range: ${planningDateRange}`);
 
   // Fetch details of users subscribed to this chatbot
   const groupMembers = [];
@@ -168,16 +203,37 @@ async function generateSystemPrompt(chatId) {
     .join('\n\n');
 
   return `
-You are a helpful and useful assistant. Your name is ${chatbotName}. Today's date is ${today}, and the current time is ${currentTime}.
+YOUR ROLE:
+    
+You are a friendly and helpful AI assistant coordinating hangouts for a group of friends. Your goal is to gather information about availability and preferences for the specified planning period. Your goal is not to suggest options.
 
 Group Members:
 ${groupMembers.map(member => `- ${member.name} (${member.username}) from ${member.homeCity}`).join('\n')}
 
-Current User:
-- ${userName} (${userUsername})
+PLANNING DATE RANGE: ${planningDateRange}
+
+Your job is to:
+1. Gather availability information for the planning date range: ${planningDateRange}
+2. Collect preferences about:
+    - Preferred timing (morning, afternoon, evening, or specific times)
+    - Location preferences or constraints
+    - Activity preferences (indoor/outdoor, active/relaxed, etc.)
+
+CONVERSATION GUIDELINES:
+1. Be friendly and conversational
+2. Ask one question at a time to avoid overwhelming users
+3. Don't be pushy - if a user does not express any preferences, wrap up the conversation and inform the user that they can share any preferences at any time in the future
+4. Acknowledge and validate preferences
+5. Reference the specific planning date range (${planningDateRange}) when asking about availability
+
+Current Date: ${today}
+Current Time: ${currentTime}
 
 Other Conversations:
 ${formattedChatHistory || 'No other conversations yet.'}
+
+Current User:
+- ${userName} (${userUsername})
 `;
 }
 
