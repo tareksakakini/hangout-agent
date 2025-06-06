@@ -1,9 +1,6 @@
 import SwiftUI
 
 struct SchedulingSection: View {
-    @Binding var availabilityDate: Date
-    @Binding var availabilityHour: Int
-    @Binding var availabilityMinute: Int
     @Binding var suggestionsDate: Date
     @Binding var suggestionsHour: Int
     @Binding var suggestionsMinute: Int
@@ -13,9 +10,6 @@ struct SchedulingSection: View {
     var timeZone: String
     
     init(
-        availabilityDate: Binding<Date>,
-        availabilityHour: Binding<Int>,
-        availabilityMinute: Binding<Int>,
         suggestionsDate: Binding<Date>,
         suggestionsHour: Binding<Int>,
         suggestionsMinute: Binding<Int>,
@@ -24,9 +18,6 @@ struct SchedulingSection: View {
         finalPlanMinute: Binding<Int>,
         timeZone: String
     ) {
-        self._availabilityDate = availabilityDate
-        self._availabilityHour = availabilityHour
-        self._availabilityMinute = availabilityMinute
         self._suggestionsDate = suggestionsDate
         self._suggestionsHour = suggestionsHour
         self._suggestionsMinute = suggestionsMinute
@@ -55,15 +46,6 @@ struct SchedulingSection: View {
             
             // Schedule items
             VStack(spacing: 12) {
-                SchedulingPickerRow(
-                    title: "Ask for Availability",
-                    icon: "person.2.circle.fill",
-                    iconColor: .green,
-                    date: $availabilityDate,
-                    hour: $availabilityHour,
-                    minute: $availabilityMinute
-                )
-                
                 SchedulingPickerRow(
                     title: "Send Suggestions",
                     icon: "lightbulb.fill",

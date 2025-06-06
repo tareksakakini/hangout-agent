@@ -237,6 +237,46 @@ struct AgentInfoView: View {
                                 }
                             }
                             Divider()
+                            
+                            // Planning Date Range
+                            if chatbot.planningStartDate != nil || chatbot.planningEndDate != nil {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "calendar.badge.clock")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.green)
+                                        Text("Planning Period")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                    }
+                                    .padding(.bottom, 8)
+                                    
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.green)
+                                            .frame(width: 28)
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Date Range")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundColor(.primary)
+                                            
+                                            Text(formatPlanningDateRange())
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 4)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                    .padding(.top, 4)
+                                }
+                                Divider()
+                            }
+                            
                             // Schedules
                             if let schedules = chatbot.schedules {
                                 VStack(alignment: .leading, spacing: 0) {
@@ -250,8 +290,6 @@ struct AgentInfoView: View {
                                     }
                                     .padding(.bottom, 8)
                                     VStack(spacing: 0) {
-                                        scheduleRow(title: "Availability Message", icon: "calendar.badge.clock", schedule: schedules.availabilityMessageSchedule)
-                                        Divider().padding(.leading, 36)
                                         scheduleRow(title: "Suggestions Message", icon: "lightbulb", schedule: schedules.suggestionsSchedule)
                                         Divider().padding(.leading, 36)
                                         scheduleRow(title: "Final Plan Message", icon: "checkmark.seal", schedule: schedules.finalPlanSchedule)
@@ -382,5 +420,30 @@ struct AgentInfoView: View {
     private func dayString(_ day: Int) -> String {
         let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         return (0...6).contains(day) ? days[day] : "?"
+    }
+    
+    private func formatPlanningDateRange() -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        
+        guard let startDate = chatbot.planningStartDate else {
+            if let endDate = chatbot.planningEndDate {
+                return "Until \(formatter.string(from: endDate))"
+            }
+            return "No date range set"
+        }
+        
+        guard let endDate = chatbot.planningEndDate else {
+            return "From \(formatter.string(from: startDate))"
+        }
+        
+        // Check if it's the same day
+        let calendar = Calendar.current
+        if calendar.isDate(startDate, inSameDayAs: endDate) {
+            return formatter.string(from: startDate)
+        } else {
+            return "\(formatter.string(from: startDate)) - \(formatter.string(from: endDate))"
+        }
     }
 }

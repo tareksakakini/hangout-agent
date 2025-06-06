@@ -49,13 +49,6 @@ class DatabaseManager {
         let chatbotRef = db.collection("chatbots").document(id)
         
         let schedulesData: [String: Any] = [
-            "availabilityMessageSchedule": [
-                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek as Any,
-                "specificDate": schedules.availabilityMessageSchedule.specificDate as Any,
-                "hour": schedules.availabilityMessageSchedule.hour,
-                "minute": schedules.availabilityMessageSchedule.minute,
-                "timeZone": schedules.availabilityMessageSchedule.timeZone
-            ],
             "suggestionsSchedule": [
                 "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek as Any,
                 "specificDate": schedules.suggestionsSchedule.specificDate as Any,
@@ -147,17 +140,8 @@ class DatabaseManager {
                 // Parse schedules if they exist
                 var schedules: ChatbotSchedules? = nil
                 if let schedulesData = data["schedules"] as? [String: Any] {
-                    if let availabilityData = schedulesData["availabilityMessageSchedule"] as? [String: Any],
-                       let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
+                    if let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
                        let finalPlanData = schedulesData["finalPlanSchedule"] as? [String: Any] {
-                        
-                        let availabilitySchedule = AgentSchedule(
-                            dayOfWeek: availabilityData["dayOfWeek"] as? Int,
-                            specificDate: availabilityData["specificDate"] as? String,
-                            hour: availabilityData["hour"] as? Int ?? 10,
-                            minute: availabilityData["minute"] as? Int ?? 0,
-                            timeZone: availabilityData["timeZone"] as? String ?? "America/Los_Angeles"
-                        )
                         
                         let suggestionsSchedule = AgentSchedule(
                             dayOfWeek: suggestionsData["dayOfWeek"] as? Int,
@@ -176,7 +160,6 @@ class DatabaseManager {
                         )
                         
                         schedules = ChatbotSchedules(
-                            availabilityMessageSchedule: availabilitySchedule,
                             suggestionsSchedule: suggestionsSchedule,
                             finalPlanSchedule: finalPlanSchedule
                         )

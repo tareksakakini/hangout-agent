@@ -19,10 +19,6 @@ struct CreateChatbotView: View {
     @State var errorMessage: String?
     
     // Scheduling state variables - now using dates instead of days
-    @State var availabilityDate: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-    @State var availabilityHour: Int = 10 // Default to 10 AM
-    @State var availabilityMinute: Int = 0
-    
     @State var suggestionsDate: Date = Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
     @State var suggestionsHour: Int = 14 // Default to 2 PM
     @State var suggestionsMinute: Int = 0
@@ -112,9 +108,6 @@ struct CreateChatbotView: View {
                             
                             // Scheduling section
                             SchedulingSection(
-                                availabilityDate: $availabilityDate,
-                                availabilityHour: $availabilityHour,
-                                availabilityMinute: $availabilityMinute,
                                 suggestionsDate: $suggestionsDate,
                                 suggestionsHour: $suggestionsHour,
                                 suggestionsMinute: $suggestionsMinute,
@@ -177,13 +170,6 @@ struct CreateChatbotView: View {
                 
                 // Create schedules with specific dates
                 let schedules = ChatbotSchedules(
-                    availabilityMessageSchedule: AgentSchedule(
-                        dayOfWeek: nil,
-                        specificDate: dateFormatter.string(from: availabilityDate),
-                        hour: availabilityHour,
-                        minute: availabilityMinute,
-                        timeZone: timeZone
-                    ),
                     suggestionsSchedule: AgentSchedule(
                         dayOfWeek: nil,
                         specificDate: dateFormatter.string(from: suggestionsDate),
