@@ -187,27 +187,6 @@ extension ChatView {
                     
                     // Fetch all chats for this chatbot
                     let allChats = await vm.getAllChatsForChatbot(chatbotId: chatbot.id)
-                    
-                    // Generate bot's reply
-                    let prompt = formatPrompt(
-                        inputRequest: currentMessage,
-                        chatbot: chatbot,
-                        allUsers: vm.users,
-                        currentUsername: vm.signedInUser?.username ?? "unknown",
-                        chats: allChats
-                    )
-                    
-                    //print(prompt)
-
-                    let botReplyText = await vm.botReply(messageText: prompt)
-                    //print(botReplyText)
-                    let parsedAgentResponse = vm.parseAgentResponse(response: botReplyText)
-                    
-                    // Send bot's message.
-                    await vm.sendMessage(chat: chat, text: parsedAgentResponse.messageToUser, senderId: chatbot.id, side: "bot")
-                    // ⚙️ Execute API calls (e.g. text other group members)
-                    await vm.performParsedAPICalls(parsedAgentResponse.apiCalls, chatbot: chatbot)
-                    //print(parsedAgentResponse.apiCalls)
                 }
             }) {
                 Image(systemName: "paperplane.fill")

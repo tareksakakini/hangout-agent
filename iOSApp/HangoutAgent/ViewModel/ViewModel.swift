@@ -40,15 +40,6 @@ class ViewModel: ObservableObject {
         return nil
     }
     
-    func botReply(messageText: String) async -> String {
-        do {
-            return try await generateOpenAIResponse(prompt: messageText)
-        } catch {
-            print("Error: \(error)")
-            return messageText + ", yourself."
-        }
-    }
-    
     func signupButtonPressed(fullname: String, username: String, email: String, password: String, homeCity: String? = nil) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
@@ -275,73 +266,6 @@ class ViewModel: ObservableObject {
             }
         } catch {
             print("Error loading signed in user: \(error)")
-        }
-    }
-    
-    func parseAgentResponse(response: String) -> ParsedAgentResponse {
-        var messageToUser = ""
-        var apiCalls: [ParsedToolCall] = []
-        
-        // Extract <response>...</response>
-        if let responseStart = response.range(of: "<response>"),
-           let responseEnd = response.range(of: "</response>") {
-            messageToUser = String(response[responseStart.upperBound..<responseEnd.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        // Extract all <api_call>...</api_call> blocks
-        let pattern = #"<api_call>\s*(\{[\s\S]*?\})\s*</api_call>"#
-        let regex = try? NSRegularExpression(pattern: pattern)
-        
-        let matches = regex?.matches(in: response, range: NSRange(response.startIndex..., in: response)) ?? []
-        
-        for match in matches {
-            if let range = Range(match.range(at: 1), in: response) {
-                let jsonString = String(response[range])
-                if let jsonData = jsonString.data(using: .utf8) {
-                    if let call = try? JSONDecoder().decode(ParsedToolCall.self, from: jsonData) {
-                        apiCalls.append(call)
-                    }
-                }
-            }
-        }
-        
-        return ParsedAgentResponse(messageToUser: messageToUser, apiCalls: apiCalls)
-    }
-    
-    func performParsedAPICalls(_ apiCalls: [ParsedToolCall], chatbot: Chatbot) async {
-        guard let sender = signedInUser else { return }
-
-        for call in apiCalls {
-            switch call.function {
-            case "text":
-                guard
-                    let recipientUsername = call.arguments["username"],
-                    let messageText = call.arguments["message"],
-                    let recipientUser = users.first(where: { $0.username == recipientUsername })
-                else {
-                    print("❌ Invalid text API call or recipient not found.")
-                    continue
-                }
-
-                guard let chat = await fetchOrCreateChat(userId: recipientUser.id, chatbotId: chatbot.id) else {
-                    print("❌ Could not fetch/create chat for recipient.")
-                    continue
-                }
-
-                // Check if this is an event card message
-                if let eventCardJson = call.arguments["eventCard"],
-                   let eventCardData = eventCardJson.data(using: .utf8),
-                   let eventCard = try? JSONDecoder().decode(EventCard.self, from: eventCardData) {
-                    print("📋 Sending message with event card: \(eventCard.activity)")
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot", eventCard: eventCard)
-                } else {
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot")
-                }
-
-            default:
-                print("⚠️ Unknown function: \(call.function)")
-            }
         }
     }
     
