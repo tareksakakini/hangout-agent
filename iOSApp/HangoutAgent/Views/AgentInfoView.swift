@@ -1,177 +1,18 @@
+//
+//  AgentInfoView.swift
+//  HangoutAgent
+//
+//  Created by Tarek Sakakini on 6/4/25.
+//
+
+
 import SwiftUI
-import FirebaseFirestore
+import PhotosUI
 
-struct GroupChatView: View {
-    let group: HangoutGroup
-    @EnvironmentObject private var vm: ViewModel
-    @State private var messageText = ""
-    @Environment(\.dismiss) private var dismiss
-    @State private var showGroupInfo = false
-    @State private var isProcessingGroupAction = false
-    @State private var groupActionError: String? = nil
-    
-    private var groupMessages: [GroupMessage] {
-        vm.groupMessages[group.id] ?? []
-    }
-    
-    var body: some View {
-        NavigationStack {
-            Divider().padding(.top, 10)
-            ScrollViewReader { scrollViewProxy in
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(groupMessages) { message in
-                            GroupMessageView(
-                                message: message,
-                                isCurrentUser: message.senderId == vm.signedInUser?.id
-                            )
-                            .id(message.id)
-                        }
-                    }
-                }
-                .onChange(of: groupMessages.count) { oldValue, newValue in
-                    scrollToBottom(using: scrollViewProxy)
-                }
-            }
-            textbox
-        }
-        .navigationTitle(group.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { showGroupInfo = true }) {
-                    Image(systemName: "ellipsis")
-                }
-            }
-        }
-        .sheet(isPresented: $showGroupInfo) {
-            GroupInfoView(
-                group: group,
-                allUsers: vm.users,
-                currentUser: vm.signedInUser,
-                onLeave: {
-                    Task {
-                        isProcessingGroupAction = true
-                        groupActionError = nil
-                        await vm.leaveGroup(groupId: group.id)
-                        DispatchQueue.main.async {
-                            showGroupInfo = false
-                            dismiss() // Pop back to group list
-                        }
-                        isProcessingGroupAction = false
-                    }
-                },
-                onDelete: {
-                    Task {
-                        isProcessingGroupAction = true
-                        groupActionError = nil
-                        do {
-                            await vm.deleteGroup(groupId: group.id)
-                            DispatchQueue.main.async {
-                                showGroupInfo = false
-                                dismiss() // Pop back to group list
-                            }
-                        } catch {
-                            groupActionError = "Failed to delete group. Please try again."
-                        }
-                        isProcessingGroupAction = false
-                    }
-                },
-                isProcessing: isProcessingGroupAction,
-                errorMessage: groupActionError
-            )
-        }
-        .onAppear {
-            vm.startListeningToGroupMessages(groupId: group.id)
-        }
-        .onDisappear {
-            vm.stopListeningToGroupMessages(groupId: group.id)
-        }
-    }
-    
-    private func scrollToBottom(using proxy: ScrollViewProxy) {
-        if let lastMessage = groupMessages.last {
-            withAnimation {
-                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-            }
-        }
-    }
-    
-    private func sendMessage() {
-        // Store the message text and clear the field immediately
-        let currentMessage = messageText
-        messageText = ""
-        
-        Task {
-            await vm.sendGroupMessage(groupId: group.id, text: currentMessage)
-        }
-    }
-}
-
-extension GroupChatView {
-    private var textbox: some View {
-        HStack {
-            TextField("Type a message...", text: $messageText)
-                .padding(12)
-                .background(Color(.systemGray6))
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-            
-            Button(action: sendMessage) {
-                Image(systemName: "paperplane.fill")
-                    .foregroundColor(.white)
-                    .padding(10)
-                    .background(messageText.isEmpty ? Color.gray : Color.blue)
-                    .clipShape(Circle())
-            }
-            .disabled(messageText.isEmpty)
-            
-        }
-        .padding()
-        .background(Color.white)
-    }
-}
-
-struct GroupMessageView: View {
-    let message: GroupMessage
-    let isCurrentUser: Bool
-    
-    var body: some View {
-        VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
-            if !isCurrentUser {
-                Text(message.senderName)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
-            }
-            
-            Text(message.text)
-                .padding()
-                .background(isCurrentUser ? Color.blue : Color.gray)
-                .foregroundColor(.white)
-                .cornerRadius(10)
-            
-            Text(formatTimestamp(message.timestamp))
-                .font(.caption2)
-                .foregroundColor(.gray)
-                .padding(.horizontal, 4)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: UIScreen.main.bounds.width / 2, alignment: isCurrentUser ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: isCurrentUser ? .trailing : .leading)
-        .padding(.horizontal)
-    }
-    
-    private func formatTimestamp(_ timestamp: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: timestamp)
-    }
-}
-
-struct GroupInfoView: View {
-    let group: HangoutGroup
+struct AgentInfoView: View {
+    let chatbot: Chatbot
     let allUsers: [User]
-    let currentUser: User?
+    let currentUsername: String
     let onLeave: () -> Void
     let onDelete: () -> Void
     var isProcessing: Bool = false
@@ -182,14 +23,12 @@ struct GroupInfoView: View {
     @State private var showDeleteConfirmation = false
 
     var creatorUser: User? {
-        // Assume the first participant is the creator (if you store creator info, use that)
-        guard let firstId = group.participants.first else { return nil }
-        return allUsers.first(where: { $0.id == firstId })
+        allUsers.first(where: { $0.username == chatbot.creator })
     }
-    var participantUsers: [User] {
-        allUsers.filter { group.participants.contains($0.id) }
+    var subscriberUsers: [User] {
+        allUsers.filter { chatbot.subscribers.contains($0.username) }
     }
-    var isCreator: Bool { currentUser?.id == group.participants.first }
+    var isCreator: Bool { chatbot.creator == currentUsername }
 
     var body: some View {
         NavigationView {
@@ -211,7 +50,7 @@ struct GroupInfoView: View {
                             Circle()
                                 .fill(
                                     LinearGradient(
-                                        gradient: Gradient(colors: [Color.green, Color.green.opacity(0.7)]),
+                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.7)]),
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     )
@@ -222,8 +61,8 @@ struct GroupInfoView: View {
                                         .font(.system(size: 35, weight: .medium))
                                         .foregroundColor(.white)
                                 )
-                                .shadow(color: Color.green.opacity(0.3), radius: 15, x: 0, y: 8)
-                            Text(group.name)
+                                .shadow(color: Color.blue.opacity(0.3), radius: 15, x: 0, y: 8)
+                            Text(chatbot.name)
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundColor(.primary)
                         }
@@ -239,53 +78,53 @@ struct GroupInfoView: View {
                                         switch phase {
                                         case .empty:
                                             Circle()
-                                                .fill(Color.green.opacity(0.15))
+                                                .fill(Color.blue.opacity(0.15))
                                                 .frame(width: 40, height: 40)
-                                                .overlay(ProgressView().scaleEffect(0.6).tint(.green))
+                                                .overlay(ProgressView().scaleEffect(0.6).tint(.blue))
                                         case .success(let image):
                                             image
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fill)
                                                 .frame(width: 40, height: 40)
                                                 .clipShape(Circle())
-                                                .overlay(Circle().stroke(Color.green.opacity(0.2), lineWidth: 1))
+                                                .overlay(Circle().stroke(Color.blue.opacity(0.2), lineWidth: 1))
                                         case .failure(_):
                                             Circle()
-                                                .fill(Color.green.opacity(0.15))
+                                                .fill(Color.blue.opacity(0.15))
                                                 .frame(width: 40, height: 40)
                                                 .overlay(
                                                     Text(creatorUser.fullname.prefix(1).uppercased())
                                                         .font(.system(size: 18, weight: .semibold))
-                                                        .foregroundColor(.green)
+                                                        .foregroundColor(.blue)
                                                 )
                                         @unknown default:
                                             Circle()
-                                                .fill(Color.green.opacity(0.15))
+                                                .fill(Color.blue.opacity(0.15))
                                                 .frame(width: 40, height: 40)
                                                 .overlay(
                                                     Text(creatorUser.fullname.prefix(1).uppercased())
                                                         .font(.system(size: 18, weight: .semibold))
-                                                        .foregroundColor(.green)
+                                                        .foregroundColor(.blue)
                                                 )
                                         }
                                     }
                                 } else if let creatorUser = creatorUser {
                                     Circle()
-                                        .fill(Color.green.opacity(0.15))
+                                        .fill(Color.blue.opacity(0.15))
                                         .frame(width: 40, height: 40)
                                         .overlay(
                                             Text(creatorUser.fullname.prefix(1).uppercased())
                                                 .font(.system(size: 18, weight: .semibold))
-                                                .foregroundColor(.green)
+                                                .foregroundColor(.blue)
                                         )
                                 } else {
                                     Circle()
-                                        .fill(Color.green.opacity(0.15))
+                                        .fill(Color.blue.opacity(0.15))
                                         .frame(width: 40, height: 40)
                                         .overlay(
                                             Image(systemName: "person.crop.circle")
                                                 .font(.system(size: 20, weight: .medium))
-                                                .foregroundColor(.green)
+                                                .foregroundColor(.blue)
                                         )
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
@@ -295,12 +134,12 @@ struct GroupInfoView: View {
                                     if let creatorUser = creatorUser {
                                         Text(creatorUser.fullname)
                                             .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.green)
+                                            .foregroundColor(.blue)
                                         Text("@\(creatorUser.username)")
                                             .font(.system(size: 13, weight: .medium))
                                             .foregroundColor(.secondary)
                                     } else {
-                                        Text("Unknown")
+                                        Text(chatbot.creator)
                                             .font(.system(size: 16, weight: .medium))
                                     }
                                 }
@@ -309,78 +148,78 @@ struct GroupInfoView: View {
                                     Text("Created")
                                         .font(.system(size: 14, weight: .semibold))
                                         .foregroundColor(.primary)
-                                    Text(group.createdAt, style: .date)
+                                    Text(chatbot.createdAt, style: .date)
                                         .font(.system(size: 13, weight: .medium))
                                         .foregroundColor(.secondary)
-                                    Text(group.createdAt, style: .time)
+                                    Text(chatbot.createdAt, style: .time)
                                         .font(.system(size: 13, weight: .medium))
                                         .foregroundColor(.secondary)
                                 }
                             }
                             Divider()
-                            // Participants
+                            // Subscribers
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
                                     Image(systemName: "person.2.fill")
                                         .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.green)
-                                    Text("Participants")
+                                        .foregroundColor(.blue)
+                                    Text("Subscribers")
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.primary)
-                                    Text("\(participantUsers.count)")
+                                    Text("\(subscriberUsers.count)")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.green)
+                                        .foregroundColor(.blue)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 4)
-                                        .background(Color.green.opacity(0.1))
+                                        .background(Color.blue.opacity(0.1))
                                         .cornerRadius(8)
                                 }
                                 VStack(spacing: 6) {
-                                    ForEach(participantUsers, id: \.id) { user in
+                                    ForEach(subscriberUsers, id: \.id) { user in
                                         HStack(spacing: 8) {
                                             if let profileImageUrl = user.profileImageUrl, !profileImageUrl.isEmpty {
                                                 AsyncImage(url: URL(string: profileImageUrl)) { phase in
                                                     switch phase {
                                                     case .empty:
                                                         Circle()
-                                                            .fill(Color.green.opacity(0.15))
+                                                            .fill(Color.blue.opacity(0.15))
                                                             .frame(width: 28, height: 28)
-                                                            .overlay(ProgressView().scaleEffect(0.6).tint(.green))
+                                                            .overlay(ProgressView().scaleEffect(0.6).tint(.blue))
                                                     case .success(let image):
                                                         image
                                                             .resizable()
                                                             .aspectRatio(contentMode: .fill)
                                                             .frame(width: 28, height: 28)
                                                             .clipShape(Circle())
-                                                            .overlay(Circle().stroke(Color.green.opacity(0.2), lineWidth: 1))
+                                                            .overlay(Circle().stroke(Color.blue.opacity(0.2), lineWidth: 1))
                                                     case .failure(_):
                                                         Circle()
-                                                            .fill(Color.green.opacity(0.15))
+                                                            .fill(Color.blue.opacity(0.15))
                                                             .frame(width: 28, height: 28)
                                                             .overlay(
                                                                 Text(user.fullname.prefix(1).uppercased())
                                                                     .font(.system(size: 13, weight: .semibold))
-                                                                    .foregroundColor(.green)
+                                                                    .foregroundColor(.blue)
                                                             )
                                                     @unknown default:
                                                         Circle()
-                                                            .fill(Color.green.opacity(0.15))
+                                                            .fill(Color.blue.opacity(0.15))
                                                             .frame(width: 28, height: 28)
                                                             .overlay(
                                                                 Text(user.fullname.prefix(1).uppercased())
                                                                     .font(.system(size: 13, weight: .semibold))
-                                                                    .foregroundColor(.green)
+                                                                    .foregroundColor(.blue)
                                                             )
                                                     }
                                                 }
                                             } else {
                                                 Circle()
-                                                    .fill(Color.green.opacity(0.15))
+                                                    .fill(Color.blue.opacity(0.15))
                                                     .frame(width: 28, height: 28)
                                                     .overlay(
                                                         Text(user.fullname.prefix(1).uppercased())
                                                             .font(.system(size: 13, weight: .semibold))
-                                                            .foregroundColor(.green)
+                                                            .foregroundColor(.blue)
                                                     )
                                             }
                                             VStack(alignment: .leading, spacing: 0) {
@@ -395,6 +234,31 @@ struct GroupInfoView: View {
                                         }
                                         .padding(.vertical, 2)
                                     }
+                                }
+                            }
+                            Divider()
+                            // Schedules
+                            if let schedules = chatbot.schedules {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "clock")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.blue)
+                                        Text("Agent Schedules")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.primary)
+                                    }
+                                    .padding(.bottom, 8)
+                                    VStack(spacing: 0) {
+                                        scheduleRow(title: "Availability Message", icon: "calendar.badge.clock", schedule: schedules.availabilityMessageSchedule)
+                                        Divider().padding(.leading, 36)
+                                        scheduleRow(title: "Suggestions Message", icon: "lightbulb", schedule: schedules.suggestionsSchedule)
+                                        Divider().padding(.leading, 36)
+                                        scheduleRow(title: "Final Plan Message", icon: "checkmark.seal", schedule: schedules.finalPlanSchedule)
+                                    }
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                    .padding(.top, 4)
                                 }
                             }
                         }
@@ -416,7 +280,7 @@ struct GroupInfoView: View {
                                     ProgressView()
                                         .frame(maxWidth: .infinity)
                                 } else {
-                                    Text("Leave Group")
+                                    Text("Leave Agent")
                                         .font(.system(size: 18, weight: .semibold))
                                         .frame(maxWidth: .infinity)
                                 }
@@ -437,7 +301,7 @@ struct GroupInfoView: View {
                                         ProgressView()
                                             .frame(maxWidth: .infinity)
                                     } else {
-                                        Text("Delete Group")
+                                        Text("Delete Agent")
                                             .font(.system(size: 18, weight: .semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -459,7 +323,7 @@ struct GroupInfoView: View {
                     }
                 }
             }
-            .navigationTitle("Group Info")
+            .navigationTitle("Agent Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -467,30 +331,56 @@ struct GroupInfoView: View {
                         .disabled(isProcessing)
                 }
             }
-            .confirmationDialog("Are you sure you want to leave this group?", isPresented: $showLeaveConfirmation) {
-                Button("Leave", role: .destructive) { onLeave() }
-            }
-            .confirmationDialog("Are you sure you want to delete this group?", isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) { onDelete() }
-            }
+        }
+        .confirmationDialog("Are you sure you want to leave this agent?", isPresented: $showLeaveConfirmation) {
+            Button("Leave", role: .destructive) { onLeave() }
+        }
+        .confirmationDialog("Are you sure you want to delete this agent?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) { onDelete() }
         }
     }
-}
-
-#Preview {
-    NavigationView {
-        GroupChatView(
-            group: HangoutGroup(
-                id: "preview",
-                name: "Preview Group",
-                participants: ["user1", "user2"],
-                participantNames: ["User 1", "User 2"],
-                createdAt: Date(),
-                eventDetails: nil,
-                lastMessage: nil,
-                updatedAt: Date()
-            )
-        )
-        .environmentObject(ViewModel())
+    private func scheduleRow(title: String, icon: String, schedule: AgentSchedule) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(.blue)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+                HStack(spacing: 8) {
+                    if let specificDate = schedule.specificDate {
+                        Text(formatDate(specificDate))
+                            .font(.system(size: 14, weight: .medium))
+                    } else if let dayOfWeek = schedule.dayOfWeek {
+                        Text(dayString(dayOfWeek))
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    Text(String(format: "%02d:%02d", schedule.hour, schedule.minute))
+                        .font(.system(size: 14, weight: .medium))
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
     }
-} 
+    
+    private func formatDate(_ dateString: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        
+        if let date = formatter.date(from: dateString) {
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: date)
+        }
+        
+        return dateString
+    }
+    
+    private func dayString(_ day: Int) -> String {
+        let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        return (0...6).contains(day) ? days[day] : "?"
+    }
+}

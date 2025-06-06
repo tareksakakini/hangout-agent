@@ -1,6 +1,9 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
+const prompts = require('./prompts');
+
+const DEBUG_PAUSE_IMAGE_GEN = true; // Set to false to enable DALL·E image generation
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -71,6 +74,90 @@ async function sendMessagesToSubscribers() {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
 
+      // Check if this chatbot should send availability messages now
+      if (chatbot.schedules && chatbot.schedules.availabilityMessageSchedule) {
+        const schedule = chatbot.schedules.availabilityMessageSchedule;
+        
+        // Create a date object representing the current time in the chatbot's timezone
+        const nowInTimezone = new Date().toLocaleString('en-US', {
+          timeZone: schedule.timeZone
+        });
+        const timezoneDate = new Date(nowInTimezone);
+        
+        // Get the current day, hour, and minute in the timezone
+        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentHour = timezoneDate.getHours();
+        const currentMinute = timezoneDate.getMinutes();
+        
+        // Format current date as YYYY-MM-DD for comparison
+        const currentDateString = timezoneDate.toISOString().split('T')[0];
+        
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+        
+        let shouldRun = false;
+        let executionKey = '';
+        
+        // Check if we should run based on specific date or day of week
+        if (schedule.specificDate) {
+          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Check if current date matches specific date and time
+          const isScheduledDate = currentDateString === schedule.specificDate;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_availability_${schedule.specificDate}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Legacy day-of-week scheduling
+          const isScheduledDay = currentDay === schedule.dayOfWeek;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_availability_${currentDateString}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else {
+          console.log(`Skipping chatbot ${chatbot.name} - no valid schedule configuration`);
+          continue;
+        }
+        
+        if (!shouldRun) {
+          continue;
+        }
+        
+        // Check if we've already executed this function for this chatbot today
+        const executionRef = db.collection('function_executions').doc(executionKey);
+        const executionDoc = await executionRef.get();
+        
+        if (executionDoc.exists) {
+          console.log(`Skipping chatbot ${chatbot.name} - availability function already executed for this date`);
+          continue;
+        }
+        
+        console.log(`Processing chatbot ${chatbot.name} - scheduled for availability messages now`);
+        
+        // Mark this execution as completed
+        await executionRef.set({
+          chatbotId: chatbot.id,
+          functionType: 'availability',
+          executedAt: admin.firestore.Timestamp.now(),
+          date: schedule.specificDate || currentDateString
+        });
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no availability schedule configured`);
+        continue;
+      }
+
       for (const subscriberUsername of chatbot.subscribers) {
         const usersSnapshot = await db.collection('users')
           .where('username', '==', subscriberUsername)
@@ -84,22 +171,55 @@ async function sendMessagesToSubscribers() {
 
         let aiMessage;
         try {
-          const completion = await openai.chat.completions.create({
+          // Always use chatbot.planningStartDate and chatbot.planningEndDate for dateRangeText
+          const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+          const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+          const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          const dateRangeText = `${startDateString} to ${endDateString}`;
+
+          // Use prompt module for availability message
+          const { system, user } = prompts.getAvailabilityPrompt(firstName, dateRangeText);
+          // Log the prompt being sent to OpenAI
+          console.log('=== AVAILABILITY MESSAGE OPENAI PROMPT DEBUG ===');
+          console.log('System Message:', system);
+          console.log('User Message:', user);
+          console.log('=== END AVAILABILITY PROMPT DEBUG ===');
+
+          // Build the OpenAI payload
+          const openaiPayload = {
             model: "gpt-4",
             messages: [
               {
                 role: "system",
-                content: "You are a friendly and casual AI helping a group of friends coordinate weekend hangouts."
+                content: system
               },
               {
                 role: "user",
-                content: `Write a message addressed to ${firstName}, asking about their availability for this weekend. Make it sound natural, upbeat, and brief. Invite them to suggest activities, locations, or timing preferences.`
+                content: user
               }
             ],
             temperature: 0.8
-          });
+          };
+          // Log the full payload
+          console.log('=== AVAILABILITY MESSAGE OPENAI FULL PAYLOAD ===');
+          console.log(JSON.stringify(openaiPayload, null, 2));
+          console.log('=== END AVAILABILITY PAYLOAD ===');
+
+          const completion = await openai.chat.completions.create(openaiPayload);
+
+          // Log the full completion object
+          console.log('=== AVAILABILITY MESSAGE OPENAI FULL COMPLETION ===');
+          console.log(JSON.stringify(completion, null, 2));
+          console.log('=== END AVAILABILITY COMPLETION ===');
 
           aiMessage = completion.choices[0].message.content.trim();
+          
+          // Log the response received from OpenAI
+          console.log('=== AVAILABILITY MESSAGE OPENAI RESPONSE DEBUG ===');
+          console.log('Full OpenAI Response:', aiMessage);
+          console.log('Response Length:', aiMessage.length);
+          console.log('=== END AVAILABILITY RESPONSE DEBUG ===');
         } catch (err) {
           console.error(`Error generating message for ${firstName}:`, err);
           continue;
@@ -148,7 +268,7 @@ async function sendMessagesToSubscribers() {
   }
 }
 
-async function checkUserAvailability(messages) {
+async function checkUserAvailability(messages, dateRangeText = "the planned dates") {
   try {
     const formattedMessages = messages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
     
@@ -157,11 +277,11 @@ async function checkUserAvailability(messages) {
       messages: [
         {
           role: "system",
-          content: "You analyze conversations and determine if a user has indicated they are not available for the weekend plans. Return ONLY 'available' or 'not available' based on your analysis."
+          content: "You analyze conversations and determine if a user has indicated they are not available for the planned hangout dates. Return ONLY 'available' or 'not available' based on your analysis."
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for the weekend hangout?`
+          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for ${dateRangeText}?`
         }
       ],
       temperature: 0.1
@@ -176,6 +296,10 @@ async function checkUserAvailability(messages) {
 }
 
 async function getImageForActivity(activity) {
+  if (DEBUG_PAUSE_IMAGE_GEN) {
+    console.log('DEBUG: Image generation is paused. Returning fallback image.');
+    return getFallbackImageForActivity(activity);
+  }
   try {
     console.log(`Generating image for activity: ${activity}`);
     
@@ -306,6 +430,106 @@ async function analyzeChatsAndSuggestOutings() {
       const chatbot = chatbotDoc.data();
       console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
       
+      // Guard against missing date fields
+      if (!chatbot.planningStartDate || !chatbot.planningEndDate) {
+        console.error(`Chatbot ${chatbot.name} (${chatbot.id}) is missing planningStartDate or planningEndDate. Skipping.`);
+        continue;
+      }
+
+      // Always define date range variables at the top of the loop
+      const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+      const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+      const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      const startDateFormatted = startDate.toISOString().split('T')[0];
+      const endDateFormatted = endDate.toISOString().split('T')[0];
+      const dateRangeText = `${startDateString} to ${endDateString}`;
+      const dateContext = `\n\nPlanning Date Range: ${startDateString} to ${endDateString}\nDate Format Instructions:\n- Use dates between ${startDateFormatted} and ${endDateFormatted} (YYYY-MM-DD format)\n- Distribute suggestions across the available dates in this range\n- Consider different days within the range for variety`;
+      
+      // Check if this chatbot should send suggestions now
+      if (chatbot.schedules && chatbot.schedules.suggestionsSchedule) {
+        const schedule = chatbot.schedules.suggestionsSchedule;
+        
+        // Create a date object representing the current time in the chatbot's timezone
+        const nowInTimezone = new Date().toLocaleString('en-US', {
+          timeZone: schedule.timeZone
+        });
+        const timezoneDate = new Date(nowInTimezone);
+        
+        // Get the current day, hour, and minute in the timezone
+        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentHour = timezoneDate.getHours();
+        const currentMinute = timezoneDate.getMinutes();
+        
+        // Format current date as YYYY-MM-DD for comparison
+        const currentDateString = timezoneDate.toISOString().split('T')[0];
+        
+        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+        
+        let shouldRun = false;
+        let executionKey = '';
+        
+        // Check if we should run based on specific date or day of week
+        if (schedule.specificDate) {
+          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Check if current date matches specific date and time
+          const isScheduledDate = currentDateString === schedule.specificDate;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_suggestions_${schedule.specificDate}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+          
+          // Legacy day-of-week scheduling
+          const isScheduledDay = currentDay === schedule.dayOfWeek;
+          const isScheduledHour = currentHour === schedule.hour;
+          const isScheduledMinute = currentMinute === schedule.minute;
+          
+          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+          executionKey = `${chatbot.id}_suggestions_${currentDateString}`;
+          
+          if (!shouldRun) {
+            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+          }
+        } else {
+          console.log(`Skipping chatbot ${chatbot.name} - no valid suggestions schedule configuration`);
+          continue;
+        }
+        
+        if (!shouldRun) {
+          continue;
+        }
+        
+        // Check if we've already executed this function for this chatbot today
+        const executionRef = db.collection('function_executions').doc(executionKey);
+        const executionDoc = await executionRef.get();
+        
+        if (executionDoc.exists) {
+          console.log(`Skipping chatbot ${chatbot.name} - suggestions function already executed for this date`);
+          continue;
+        }
+        
+        console.log(`Processing chatbot ${chatbot.name} - scheduled for suggestions now`);
+        
+        // Mark this execution as completed
+        await executionRef.set({
+          chatbotId: chatbot.id,
+          functionType: 'suggestions',
+          executedAt: admin.firestore.Timestamp.now(),
+          date: schedule.specificDate || currentDateString
+        });
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no suggestions schedule configured`);
+        continue;
+      }
+
       console.log(`Fetching chats for chatbot: ${chatbot.id}`);
       const chatsSnapshot = await db.collection('chats')
         .where('chatbotId', '==', chatbot.id)
@@ -333,7 +557,7 @@ async function analyzeChatsAndSuggestOutings() {
         // Check if user is available based on their messages
         console.log(`Checking availability for user: ${userId}`);
         try {
-          const isUnavailable = await checkUserAvailability(messages);
+          const isUnavailable = await checkUserAvailability(messages, dateRangeText);
           if (isUnavailable) {
             unavailableUserIds.push(userId);
             console.log(`User ${userId} indicated they are not available`);
@@ -370,12 +594,11 @@ async function analyzeChatsAndSuggestOutings() {
       }
       
       const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
-      console.log('Formatted messages for OpenAI, length:', formattedMessages.length);
-      
-      if (formattedMessages.length > 30000) {
+      let promptMessages = formattedMessages;
+      if (formattedMessages.length > 15000) {
         console.log('Warning: Conversation history is very long, truncating to avoid token limits');
-        const truncatedMessages = formattedMessages.substring(0, 30000);
-        console.log('Truncated message length:', truncatedMessages.length);
+        promptMessages = formattedMessages.substring(0, 15000);
+        console.log('Truncated message length:', promptMessages.length);
       }
 
       // Prepare location context for the prompt
@@ -386,87 +609,64 @@ async function analyzeChatsAndSuggestOutings() {
         console.log(`Location context for OpenAI: ${locationContext}`);
       }
 
-      // Get current date information for accurate weekend date suggestions
-      const now = new Date();
-      const currentDateString = now.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      const currentDayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-      
-      // Calculate next weekend dates
-      let daysUntilSaturday = (6 - currentDayOfWeek) % 7;
-      let daysUntilSunday = (7 - currentDayOfWeek) % 7;
-      
-      // If it's already weekend, get next weekend
-      if (currentDayOfWeek === 0) { // Sunday
-        daysUntilSaturday = 6;
-        daysUntilSunday = 7;
-      } else if (currentDayOfWeek === 6) { // Saturday
-        daysUntilSaturday = 7;
-        daysUntilSunday = 1;
-      }
-      
-      const nextSaturday = new Date(now);
-      nextSaturday.setDate(now.getDate() + daysUntilSaturday);
-      const nextSunday = new Date(now);
-      nextSunday.setDate(now.getDate() + daysUntilSunday);
-      
-      const nextSaturdayString = nextSaturday.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      const nextSundayString = nextSunday.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-      
-      // Format dates for the event cards (YYYY-MM-DD format)
-      const nextSaturdayFormatted = nextSaturday.toISOString().split('T')[0];
-      const nextSundayFormatted = nextSunday.toISOString().split('T')[0];
-      
-      const dateContext = `\n\nCurrent date: ${currentDateString}
-Next Weekend Dates:
-- Saturday: ${nextSaturdayString} (use ${nextSaturdayFormatted} in Date field)
-- Sunday: ${nextSundayString} (use ${nextSundayFormatted} in Date field)
-
-Please use these exact dates in your suggestions and vary between Saturday and Sunday events.`;
-      
-      console.log(`Date context for OpenAI: ${dateContext}`);
-
       console.log('Calling OpenAI to generate suggestions');
       try {
-        // Set a timeout for the OpenAI call (30 seconds)
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('OpenAI API call timed out')), 30000)
+        // Use prompt module for group suggestion prompt
+        const { system, user } = prompts.getSuggestionPrompt(
+          promptMessages,
+          availableUserCities,
+          dateRangeText,
+          dateContext
         );
-        
-        const openAIPromise = openai.chat.completions.create({
+        // Log the prompt being sent to OpenAI
+        console.log('=== OPENAI PROMPT DEBUG ===');
+        console.log('System Message:', system);
+        console.log('User Message:', user);
+        console.log('Prompt length:', user.length);
+        console.log('=== END PROMPT DEBUG ===');
+
+        // Build the OpenAI payload
+        const openaiPayload = {
           model: "gpt-4",
           messages: [
             {
               role: "system",
-              content: "You are a helpful assistant that analyzes group chat conversations and suggests weekend outing options. For each suggestion, include activity, specific location with address, date (use the exact dates provided), specific start and end times. When subscriber locations are provided, prioritize activities in or accessible from those areas. IMPORTANT: Use the exact date format provided (YYYY-MM-DD) in the Date field."
+              content: system
             },
             {
               role: "user",
-              content: `Conversation history:\n${formattedMessages.length > 30000 ? formattedMessages.substring(0, 30000) : formattedMessages}${locationContext}${dateContext}\n\nBased on this conversation, subscriber locations, and the current date context, suggest 5 outing options for the upcoming weekend. Format each suggestion as a separate paragraph with these details clearly labeled: Activity, Location (with address), Date (use YYYY-MM-DD format), Start Time, End Time. Add a brief 1-2 sentence description about why this would be fun.`
+              content: user
             }
           ],
           temperature: 0.8
-        });
-        
+        };
+        // Log the full payload
+        console.log('=== SUGGESTION GENERATION OPENAI FULL PAYLOAD ===');
+        console.log(JSON.stringify(openaiPayload, null, 2));
+        console.log('=== END SUGGESTION PAYLOAD ===');
+
+        // Add timeoutPromise for OpenAI call
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('OpenAI API call timed out')), 30000)
+        );
+
+        const openAIPromise = openai.chat.completions.create(openaiPayload);
         // Race the OpenAI call against the timeout
         const completion = await Promise.race([openAIPromise, timeoutPromise]);
 
+        // Log the full completion object
+        console.log('=== SUGGESTION GENERATION OPENAI FULL COMPLETION ===');
+        console.log(JSON.stringify(completion, null, 2));
+        console.log('=== END SUGGESTION COMPLETION ===');
+
         console.log('Successfully received suggestions from OpenAI');
         const suggestionsText = completion.choices[0].message.content.trim();
+        
+        // Log the response received from OpenAI
+        console.log('=== OPENAI RESPONSE DEBUG ===');
+        console.log('Full OpenAI Response:', suggestionsText);
+        console.log('Response Length:', suggestionsText.length);
+        console.log('=== END RESPONSE DEBUG ===');
         console.log('Suggestions text length:', suggestionsText.length);
         const suggestionParagraphs = suggestionsText.split(/\n\n+/);
         console.log(`Split into ${suggestionParagraphs.length} suggestion paragraphs`);
@@ -511,7 +711,7 @@ Please use these exact dates in your suggestions and vary between Saturday and S
             console.log(`Sending intro message to ${user.fullname}`);
             const introMessage = {
               id: admin.firestore.Timestamp.now().toMillis().toString(),
-              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for the weekend:`,
+              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for ${dateRangeText}:`,
               senderId: chatbot.id,
               timestamp: admin.firestore.Timestamp.now(),
               side: 'bot'
@@ -534,7 +734,7 @@ Please use these exact dates in your suggestions and vary between Saturday and S
             // Update the chat's last message
             console.log(`Updating last message for chat ${chatDoc.id}`);
             await chatDoc.ref.update({
-              lastMessage: `${eventCards.length} weekend suggestions`,
+              lastMessage: `${eventCards.length} suggestions for ${dateRangeText}`,
               updatedAt: admin.firestore.Timestamp.now()
             });
             console.log(`Successfully sent suggestions to ${user.fullname}`);
@@ -561,6 +761,92 @@ async function analyzeResponsesAndSendFinalPlan() {
 
   for (const chatbotDoc of chatbotsSnapshot.docs) {
     const chatbot = chatbotDoc.data();
+    console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
+    
+    // Check if this chatbot should send final plan now
+    if (chatbot.schedules && chatbot.schedules.finalPlanSchedule) {
+      const schedule = chatbot.schedules.finalPlanSchedule;
+      
+      // Create a date object representing the current time in the chatbot's timezone
+      const nowInTimezone = new Date().toLocaleString('en-US', {
+        timeZone: schedule.timeZone
+      });
+      const timezoneDate = new Date(nowInTimezone);
+      
+      // Get the current day, hour, and minute in the timezone
+      const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const currentHour = timezoneDate.getHours();
+      const currentMinute = timezoneDate.getMinutes();
+      
+      // Format current date as YYYY-MM-DD for comparison
+      const currentDateString = timezoneDate.toISOString().split('T')[0];
+      
+      console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
+      
+      let shouldRun = false;
+      let executionKey = '';
+      
+      // Check if we should run based on specific date or day of week
+      if (schedule.specificDate) {
+        console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Check if current date matches specific date and time
+        const isScheduledDate = currentDateString === schedule.specificDate;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute;
+        
+        shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
+        executionKey = `${chatbot.id}_finalplan_${schedule.specificDate}`;
+        
+        if (!shouldRun) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        }
+      } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
+        
+        // Legacy day-of-week scheduling
+        const isScheduledDay = currentDay === schedule.dayOfWeek;
+        const isScheduledHour = currentHour === schedule.hour;
+        const isScheduledMinute = currentMinute === schedule.minute;
+        
+        shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
+        executionKey = `${chatbot.id}_finalplan_${currentDateString}`;
+        
+        if (!shouldRun) {
+          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
+        }
+      } else {
+        console.log(`Skipping chatbot ${chatbot.name} - no valid final plan schedule configuration`);
+        continue;
+      }
+      
+      if (!shouldRun) {
+        continue;
+      }
+      
+      // Check if we've already executed this function for this chatbot today
+      const executionRef = db.collection('function_executions').doc(executionKey);
+      const executionDoc = await executionRef.get();
+      
+      if (executionDoc.exists) {
+        console.log(`Skipping chatbot ${chatbot.name} - final plan function already executed for this date`);
+        continue;
+      }
+      
+      console.log(`Processing chatbot ${chatbot.name} - scheduled for final plan now`);
+      
+      // Mark this execution as completed
+      await executionRef.set({
+        chatbotId: chatbot.id,
+        functionType: 'finalplan',
+        executedAt: admin.firestore.Timestamp.now(),
+        date: schedule.specificDate || currentDateString
+      });
+    } else {
+      console.log(`Skipping chatbot ${chatbot.name} - no final plan schedule configured`);
+      continue;
+    }
+
     const chatsSnapshot = await db.collection('chats')
       .where('chatbotId', '==', chatbot.id)
       .get();
@@ -570,6 +856,23 @@ async function analyzeResponsesAndSendFinalPlan() {
     let availableUserNames = [];
     let availableUserIds = [];
     let originalSuggestions = [];
+    
+    // Format date range for availability checking
+    let dateRangeText = "the upcoming weekend";
+    if (chatbot.planningStartDate && chatbot.planningEndDate) {
+      const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
+      const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
+      const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      
+      if (startDate.getFullYear() !== endDate.getFullYear()) {
+        const startWithYear = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const endWithYear = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        dateRangeText = `${startWithYear} to ${endWithYear}`;
+      } else {
+        dateRangeText = `${startDateString} to ${endDateString}`;
+      }
+    }
     
     // First pass to identify which users are unavailable and collect names of available users
     for (const chatDoc of chatsSnapshot.docs) {
@@ -581,7 +884,7 @@ async function analyzeResponsesAndSendFinalPlan() {
       const messages = messagesSnapshot.docs.map(doc => doc.data());
       
       // Check if user is available based on their messages
-      const isUnavailable = await checkUserAvailability(messages);
+      const isUnavailable = await checkUserAvailability(messages, dateRangeText);
       
       const userDoc = await db.collection('users').doc(userId).get();
       const user = userDoc.data();
@@ -615,22 +918,54 @@ async function analyzeResponsesAndSendFinalPlan() {
       `Option ${index + 1}:\nActivity: ${s.activity}\nLocation: ${s.location}\nDate: ${s.date}\nTime: ${s.startTime}-${s.endTime}\nDescription: ${s.description}`
     ).join('\n\n');
 
-    const completion = await openai.chat.completions.create({
+    // Use prompt module for final plan selection
+    const { system, user } = prompts.getFinalPlanPrompt(
+      formattedMessages,
+      availableUserNames,
+      dateRangeText,
+      formattedSuggestions
+    );
+    // Log the prompt being sent to OpenAI
+    console.log('=== FINAL PLAN SELECTION OPENAI PROMPT DEBUG ===');
+    console.log('System Message:', system);
+    console.log('User Message:', user);
+    console.log('=== END FINAL PLAN PROMPT DEBUG ===');
+
+    // Build the OpenAI payload
+    const openaiPayload = {
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: "You analyze group chat conversations to select the most popular weekend plan from the original suggestions. You must choose exactly one of the numbered options provided. Look for explicit preferences (e.g., 'I like option 1' or 'the first one sounds good') and implicit preferences in the conversation."
+          content: system
         },
         {
           role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nAvailable participants: ${availableUserNames.join(', ')}\n\nOriginal suggestions (numbered for reference):\n${formattedSuggestions}\n\nBased on the conversation, which option (1-${originalSuggestions.length}) is most preferred by the group? Return ONLY the number of your selection (e.g., '1' or '2').`
+          content: user
         }
       ],
       temperature: 0.3
-    });
+    };
+    // Log the full payload
+    console.log('=== FINAL PLAN SELECTION OPENAI FULL PAYLOAD ===');
+    console.log(JSON.stringify(openaiPayload, null, 2));
+    console.log('=== END FINAL PLAN PAYLOAD ===');
 
-    const selectedIndex = parseInt(completion.choices[0].message.content.trim()) - 1;
+    const completion = await openai.chat.completions.create(openaiPayload);
+
+    // Log the full completion object
+    console.log('=== FINAL PLAN SELECTION OPENAI FULL COMPLETION ===');
+    console.log(JSON.stringify(completion, null, 2));
+    console.log('=== END FINAL PLAN COMPLETION ===');
+
+    const rawResponse = completion.choices[0].message.content.trim();
+    // Log the response received from OpenAI
+    console.log('=== FINAL PLAN SELECTION OPENAI RESPONSE DEBUG ===');
+    console.log('Full OpenAI Response:', rawResponse);
+    console.log('Response Length:', rawResponse.length);
+    console.log('=== END FINAL PLAN RESPONSE DEBUG ===');
+
+    let selectedIndex = parseInt(rawResponse) - 1;
     
     // Validate the selection
     if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= originalSuggestions.length) {
@@ -727,8 +1062,8 @@ exports.sendWeeklyMessages = functions
   .region('us-central1')
   .runWith({ platform: 'gcfv2' })
   .pubsub
-  .schedule('06 19 * * 5')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => sendMessagesToSubscribers());
 
 exports.suggestWeekendOutings = functions
@@ -739,8 +1074,8 @@ exports.suggestWeekendOutings = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('09 19 * * 5')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => analyzeChatsAndSuggestOutings());
 
 exports.sendFinalPlan = functions
@@ -751,8 +1086,8 @@ exports.sendFinalPlan = functions
     memory: '1GB' // Increase memory allocation
   })
   .pubsub
-  .schedule('12 19 * * 5')
-  .timeZone('America/Los_Angeles')
+  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
+  .timeZone('UTC')
   .onRun(async () => analyzeResponsesAndSendFinalPlan());
 
 exports.sendMessagesToSubscribers = sendMessagesToSubscribers;

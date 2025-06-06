@@ -40,14 +40,49 @@ class DatabaseManager {
         }
     }
     
-    func addChatbotToFirestore(id: String, name: String, subscribers: [String]) async throws {
+    func addChatbotToFirestore(id: String, name: String, subscribers: [String], schedules: ChatbotSchedules, creator: String, createdAt: Date, planningStartDate: Date? = nil, planningEndDate: Date? = nil) async throws {
         let chatbotRef = db.collection("chatbots").document(id)
         
-        let chatbotData: [String: Any] = [
+        let schedulesData: [String: Any] = [
+            "availabilityMessageSchedule": [
+                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek as Any,
+                "specificDate": schedules.availabilityMessageSchedule.specificDate as Any,
+                "hour": schedules.availabilityMessageSchedule.hour,
+                "minute": schedules.availabilityMessageSchedule.minute,
+                "timeZone": schedules.availabilityMessageSchedule.timeZone
+            ],
+            "suggestionsSchedule": [
+                "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek as Any,
+                "specificDate": schedules.suggestionsSchedule.specificDate as Any,
+                "hour": schedules.suggestionsSchedule.hour,
+                "minute": schedules.suggestionsSchedule.minute,
+                "timeZone": schedules.suggestionsSchedule.timeZone
+            ],
+            "finalPlanSchedule": [
+                "dayOfWeek": schedules.finalPlanSchedule.dayOfWeek as Any,
+                "specificDate": schedules.finalPlanSchedule.specificDate as Any,
+                "hour": schedules.finalPlanSchedule.hour,
+                "minute": schedules.finalPlanSchedule.minute,
+                "timeZone": schedules.finalPlanSchedule.timeZone
+            ]
+        ]
+        
+        var chatbotData: [String: Any] = [
             "id": id,
             "name": name,
             "subscribers": subscribers,
+            "schedules": schedulesData,
+            "creator": creator,
+            "createdAt": Timestamp(date: createdAt)
         ]
+        
+        // Add planning date range if provided
+        if let startDate = planningStartDate {
+            chatbotData["planningStartDate"] = Timestamp(date: startDate)
+        }
+        if let endDate = planningEndDate {
+            chatbotData["planningEndDate"] = Timestamp(date: endDate)
+        }
         
         do {
             try await chatbotRef.setData(chatbotData)
@@ -97,11 +132,57 @@ class DatabaseManager {
                 guard
                     let id = data["id"] as? String,
                     let name = data["name"] as? String,
-                    let subscribers = data["subscribers"] as? [String]
+                    let subscribers = data["subscribers"] as? [String],
+                    let creator = data["creator"] as? String,
+                    let createdAtTimestamp = data["createdAt"] as? Timestamp
                 else {
                     return nil
                 }
-                return Chatbot(id: id, name: name, subscribers: subscribers)
+                let createdAt = createdAtTimestamp.dateValue()
+                // Parse schedules if they exist
+                var schedules: ChatbotSchedules? = nil
+                if let schedulesData = data["schedules"] as? [String: Any] {
+                    if let availabilityData = schedulesData["availabilityMessageSchedule"] as? [String: Any],
+                       let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
+                       let finalPlanData = schedulesData["finalPlanSchedule"] as? [String: Any] {
+                        
+                        let availabilitySchedule = AgentSchedule(
+                            dayOfWeek: availabilityData["dayOfWeek"] as? Int,
+                            specificDate: availabilityData["specificDate"] as? String,
+                            hour: availabilityData["hour"] as? Int ?? 10,
+                            minute: availabilityData["minute"] as? Int ?? 0,
+                            timeZone: availabilityData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        let suggestionsSchedule = AgentSchedule(
+                            dayOfWeek: suggestionsData["dayOfWeek"] as? Int,
+                            specificDate: suggestionsData["specificDate"] as? String,
+                            hour: suggestionsData["hour"] as? Int ?? 14,
+                            minute: suggestionsData["minute"] as? Int ?? 0,
+                            timeZone: suggestionsData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        let finalPlanSchedule = AgentSchedule(
+                            dayOfWeek: finalPlanData["dayOfWeek"] as? Int,
+                            specificDate: finalPlanData["specificDate"] as? String,
+                            hour: finalPlanData["hour"] as? Int ?? 16,
+                            minute: finalPlanData["minute"] as? Int ?? 0,
+                            timeZone: finalPlanData["timeZone"] as? String ?? "America/Los_Angeles"
+                        )
+                        
+                        schedules = ChatbotSchedules(
+                            availabilityMessageSchedule: availabilitySchedule,
+                            suggestionsSchedule: suggestionsSchedule,
+                            finalPlanSchedule: finalPlanSchedule
+                        )
+                    }
+                }
+                
+                // Parse planning date range if available
+                let planningStartDate = (data["planningStartDate"] as? Timestamp)?.dateValue()
+                let planningEndDate = (data["planningEndDate"] as? Timestamp)?.dateValue()
+                
+                return Chatbot(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
             }
         } catch {
             print("Error fetching chatbots: \(error.localizedDescription)")
@@ -420,5 +501,12 @@ class DatabaseManager {
             print("❌ Error updating home city: \(error.localizedDescription)")
             throw error
         }
+    }
+    
+    // Check if username is taken
+    func isUsernameTaken(username: String) async throws -> Bool {
+        let usersRef = db.collection("users")
+        let querySnapshot = try await usersRef.whereField("username", isEqualTo: username).getDocuments()
+        return !querySnapshot.documents.isEmpty
     }
 }
