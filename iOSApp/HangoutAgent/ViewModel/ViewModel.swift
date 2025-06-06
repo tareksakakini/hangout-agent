@@ -105,14 +105,38 @@ class ViewModel: ObservableObject {
             let createdAt = Date()
             try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
             
-            // Run all Firestore calls in parallel for better performance
+            // Create chats and send initial messages
             await withTaskGroup(of: Void.self) { group in
                 for username in subscribers {
                     if let user = users.first(where: { $0.username == username }) {
                         group.addTask {
-                            async let addSub = try? await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
-                            async let createChat = try? await firestoreService.createChat(chatbotId: id, userId: user.id)
-                            _ = await (addSub, createChat)
+                            do {
+                                // Add subscription and create chat
+                                try await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
+                                let chatId = try await firestoreService.createChat(chatbotId: id, userId: user.id)
+                                
+                                // Send initial welcome message
+                                let welcomeMessage = await self.generateWelcomeMessage(
+                                    userName: user.fullname,
+                                    chatbotName: name,
+                                    planningStartDate: planningStartDate,
+                                    planningEndDate: planningEndDate
+                                )
+                                
+                                let message = Message(
+                                    id: UUID().uuidString,
+                                    text: welcomeMessage,
+                                    senderId: "chatbot",
+                                    timestamp: Date(),
+                                    side: "bot"
+                                )
+                                
+                                try await firestoreService.sendMessageToChat(chatId: chatId, message: message)
+                                print("✅ Sent welcome message to \(user.fullname)")
+                                
+                            } catch {
+                                print("❌ Error setting up chat for \(user.fullname): \(error)")
+                            }
                         }
                     }
                 }
@@ -823,5 +847,39 @@ class ViewModel: ObservableObject {
             print("Error checking username uniqueness: \(error)")
             return false // Assume not taken on error
         }
+    }
+    
+    // Generate welcome message for new chatbot
+    private func generateWelcomeMessage(userName: String, chatbotName: String, planningStartDate: Date?, planningEndDate: Date?) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        
+        // Format the date range
+        let dateRangeText: String
+        if let startDate = planningStartDate, let endDate = planningEndDate {
+            let calendar = Calendar.current
+            if calendar.isDate(startDate, inSameDayAs: endDate) {
+                // Same day
+                dateRangeText = "on \(formatter.string(from: startDate))"
+            } else {
+                // Date range
+                dateRangeText = "between \(formatter.string(from: startDate)) and \(formatter.string(from: endDate))"
+            }
+        } else if let startDate = planningStartDate {
+            dateRangeText = "starting \(formatter.string(from: startDate))"
+        } else if let endDate = planningEndDate {
+            dateRangeText = "by \(formatter.string(from: endDate))"
+        } else {
+            dateRangeText = "soon"
+        }
+        
+        return """
+Hi \(userName)! 👋
+
+I'm your hangout planning assistant! I'm here to help coordinate a fun get-together for your group \(dateRangeText).
+
+I'll be gathering everyone's availability and preferences. To get started, could you let me know if and when you're available during this time period? 😊
+"""
     }
 }
