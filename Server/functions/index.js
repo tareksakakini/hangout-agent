@@ -489,6 +489,7 @@ Do not include users who:
 - Haven't responded yet
 - Gave vague or uncertain responses
 - Only mentioned preferences without indicating unavailability
+- indicated unavailability for only a portion of the planning range
 
 Chat History:
 ${JSON.stringify(chatHistory, null, 2)}
