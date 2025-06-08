@@ -219,6 +219,46 @@ class ViewModel: ObservableObject {
         }
     }
     
+    func leaveAgent(chatbotId: String) async -> (success: Bool, errorMessage: String?) {
+        guard let signedInUser = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            
+            // Remove user from chatbot subscribers
+            if let idx = chatbots.firstIndex(where: { $0.id == chatbotId }) {
+                var updatedChatbot = chatbots[idx]
+                updatedChatbot.subscribers.removeAll { $0 == signedInUser.username }
+                
+                // Update chatbot in database
+                let chatbotRef = firestoreService.db.collection("chatbots").document(chatbotId)
+                try await chatbotRef.updateData([
+                    "subscribers": updatedChatbot.subscribers
+                ])
+                
+                // Remove subscription from user in database
+                try await firestoreService.removeSubscriptionFromUser(uid: signedInUser.id, chatbotId: chatbotId)
+                
+                // Update local data
+                DispatchQueue.main.async {
+                    self.chatbots[idx] = updatedChatbot
+                    self.signedInUser?.subscriptions.removeAll { $0 == chatbotId }
+                    self.chats.removeAll { $0.chatbotID == chatbotId }
+                }
+                
+                return (true, nil)
+            } else {
+                return (false, "Agent not found")
+            }
+            
+        } catch {
+            print("Error leaving agent: \(error)")
+            return (false, "Failed to leave agent. Please try again.")
+        }
+    }
+    
     func signoutButtonPressed() async {
         do {
             try AuthManager.shared.signout()

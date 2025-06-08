@@ -194,6 +194,20 @@ class DatabaseManager {
         }
     }
     
+    func removeSubscriptionFromUser(uid: String, chatbotId: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "subscriptions": FieldValue.arrayRemove([chatbotId])
+            ])
+            print("Subscription removed successfully!")
+        } catch {
+            print("Error removing subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     func createChat(chatbotId: String, userId: String) async throws -> String {
         let chatRef = db.collection("chats").document()
         let chatData: [String: Any] = [

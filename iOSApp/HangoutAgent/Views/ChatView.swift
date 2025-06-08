@@ -89,27 +89,18 @@ struct ChatView: View {
                     Task {
                         isProcessingAgentAction = true
                         agentActionError = nil
-                        guard let signedInUser = vm.signedInUser else { return }
-                        do {
-                            if let idx = vm.chatbots.firstIndex(where: { $0.id == chatbot.id }) {
-                                var updatedChatbot = vm.chatbots[idx]
-                                updatedChatbot.subscribers.removeAll { $0 == signedInUser.username }
-                                let firestoreService = DatabaseManager()
-                                let chatbotRef = firestoreService.db.collection("chatbots").document(chatbot.id)
-                                try await chatbotRef.updateData([
-                                    "subscribers": updatedChatbot.subscribers
-                                ])
-                                DispatchQueue.main.async {
-                                    vm.chatbots[idx] = updatedChatbot
-                                    vm.signedInUser?.subscriptions.removeAll { $0 == chatbot.id }
-                                    showAgentInfo = false
-                                    dismiss() // Pop back to chat list
-                                }
+                        
+                        let result = await vm.leaveAgent(chatbotId: chatbot.id)
+                        
+                        DispatchQueue.main.async {
+                            if result.success {
+                                showAgentInfo = false
+                                dismiss() // Pop back to chat list
+                            } else {
+                                agentActionError = result.errorMessage
                             }
-                        } catch {
-                            agentActionError = "Failed to leave agent. Please try again."
+                            isProcessingAgentAction = false
                         }
-                        isProcessingAgentAction = false
                     }
                 },
                 onDelete: {
