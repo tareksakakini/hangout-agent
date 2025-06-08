@@ -145,7 +145,7 @@ struct CreateChatbotView: View {
         }
         .onAppear {
             Task {
-                vm.users = await vm.getAllUsers()
+                await vm.fetchAllUsers()
             }
         }
         .sheet(item: $profileUser) { user in
@@ -187,8 +187,6 @@ struct CreateChatbotView: View {
                 )
                 
                 await vm.createChatbotButtonPressed(id: chatbotID, name: name, subscribers: subscribers, schedules: schedules, uid: user.id, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
-                vm.chatbots = await vm.getAllChatbots()
-                vm.signedInUser = await vm.getUser(uid: user.id)
                 dismiss()
             }
         }

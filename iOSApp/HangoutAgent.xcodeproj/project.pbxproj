@@ -14,7 +14,6 @@
 		E686B55E2DBC03E60099B41C /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = E686B55D2DBC03E60099B41C /* FirebaseFirestore */; };
 		E686B5602DBC03E60099B41C /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = E686B55F2DBC03E60099B41C /* FirebaseStorage */; };
 		E68A91E82DDB9F94006CB0F6 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = E68A91E72DDB9F94006CB0F6 /* Secrets.plist */; };
-
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */

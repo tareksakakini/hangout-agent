@@ -4,71 +4,73 @@ import FirebaseFirestore
 struct GroupListView: View {
     @EnvironmentObject private var vm: ViewModel
     @State private var selectedGroup: HangoutGroup?
+    @State private var scrollOffset: CGFloat = 0
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(.systemGray6)
-                    .ignoresSafeArea()
+        ZStack(alignment: .top) {
+            Color(.systemGray6)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                DynamicHeader(
+                    title: "Groups",
+                    scrollOffset: scrollOffset
+                )
                 
-                VStack {
-                    if vm.signedInUser != nil {
-                        if vm.groups.isEmpty {
-                            VStack(spacing: 20) {
-                                Image(systemName: "person.3")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.gray)
-                                
-                                Text("No Groups Yet")
-                                    .font(.title2)
-                                    .fontWeight(.medium)
-                                
-                                Text("You'll see groups here when you're part of an outing. Groups are automatically created when events are planned!")
-                                    .font(.body)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            List {
+                ScrollView {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: ScrollOffsetPreferenceKey.self,
+                            value: geometry.frame(in: .named("scroll")).minY
+                        )
+                    }
+                    .frame(height: 0)
+                    
+                    VStack {
+                        if vm.signedInUser != nil {
+                            if vm.groups.isEmpty {
+                                VStack(spacing: 20) {
+                                    Image(systemName: "person.3")
+                                        .font(.system(size: 60))
+                                        .foregroundColor(.gray)
+                                    
+                                    Text("No Groups Yet")
+                                        .font(.title2)
+                                        .fontWeight(.medium)
+                                    
+                                    Text("You'll see groups here when you're part of an outing. Groups are automatically created when events are planned!")
+                                        .font(.body)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding(.top, 100)
+                            } else {
                                 ForEach(vm.groups) { group in
                                     GroupRowWithNavigation(group: group)
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
+                                        .padding(.horizontal)
+                                        .padding(.vertical, 4)
                                 }
+                                .padding(.top, 10)
                             }
-                            .listStyle(.plain)
-                            .refreshable {
-                                await vm.loadGroupsForUser()
-                            }
-                            .navigationDestination(item: $selectedGroup) { group in
-                                GroupChatView(group: group)
-                                    .environmentObject(vm)
-                            }
-                        }
-                    } else {
-                        Text("No user signed in.")
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
-            .navigationTitle("Groups")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Refresh") {
-                        Task {
-                            await vm.loadGroupsForUser()
+                        } else {
+                            Text("No user signed in.")
+                                .foregroundColor(.gray)
+                                .padding(.top, 100)
                         }
                     }
                 }
-            }
-            .onAppear {
-                Task {
+                .coordinateSpace(name: "scroll")
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = -value
+                }
+                .refreshable {
                     await vm.loadGroupsForUser()
                 }
             }
         }
+        .navigationBarHidden(true)
     }
 }
 

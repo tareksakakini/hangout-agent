@@ -25,8 +25,8 @@ class ViewModel: ObservableObject {
     init() {
         Task {
             await loadSignedInUser()
-            self.users = await getAllUsers()
-            self.chatbots = await getAllChatbots()
+            await fetchAllUsers()
+            await fetchAllChatbots()
             await loadGroupsForUser()
         }
     }
@@ -91,7 +91,9 @@ class ViewModel: ObservableObject {
     func getUser(uid: String) async -> User? {
         do {
             let firestoreService = DatabaseManager()
-            return try await firestoreService.getUserFromFirestore(uid: uid)
+            let user = try await firestoreService.getUserFromFirestore(uid: uid)
+            self.signedInUser = user
+            return user
         } catch {
             print(error)
             return nil
@@ -144,17 +146,22 @@ class ViewModel: ObservableObject {
         } catch {
             print(error)
         }
+        await fetchAllChatbots()
+        await loadSignedInUser()
     }
     
-    
-    func getAllChatbots() async -> [Chatbot] {
+    func fetchAllChatbots() async {
         do {
             let firestoreService = DatabaseManager()
-            return try await firestoreService.getAllChatbots()
+            self.chatbots = try await firestoreService.getAllChatbots()
         } catch {
             print(error)
-            return []
+            self.chatbots = []
         }
+    }
+    
+    func fetchAllUsers() async {
+        self.users = await getAllUsers()
     }
     
     func getAllUsers() async -> [User] {
