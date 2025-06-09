@@ -9,7 +9,6 @@
 import Foundation
 
 struct ChatbotSchedules: Codable, Hashable {
-    var availabilityMessageSchedule: AgentSchedule
     var suggestionsSchedule: AgentSchedule  
     var finalPlanSchedule: AgentSchedule
 }

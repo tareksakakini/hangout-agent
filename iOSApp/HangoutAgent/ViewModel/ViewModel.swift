@@ -25,8 +25,8 @@ class ViewModel: ObservableObject {
     init() {
         Task {
             await loadSignedInUser()
-            self.users = await getAllUsers()
-            self.chatbots = await getAllChatbots()
+            await fetchAllUsers()
+            await fetchAllChatbots()
             await loadGroupsForUser()
         }
     }
@@ -40,21 +40,17 @@ class ViewModel: ObservableObject {
         return nil
     }
     
-    func botReply(messageText: String) async -> String {
-        do {
-            return try await generateOpenAIResponse(prompt: messageText)
-        } catch {
-            print("Error: \(error)")
-            return messageText + ", yourself."
-        }
-    }
-    
     func signupButtonPressed(fullname: String, username: String, email: String, password: String, homeCity: String? = nil) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
+            
+            // Automatically detect user's timezone
+            let userTimezone = TimezoneHelper.getCurrentTimezone()
+            print("🌍 Detected user timezone: \(userTimezone)")
+            
             let firestoreService = DatabaseManager()
-            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity)
-            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity)
+            try await firestoreService.addUserToFirestore(uid: authUser.uid, fullname: fullname, username: username, email: email, homeCity: homeCity, timezone: userTimezone)
+            let user = User(id: authUser.uid, fullname: fullname, username: username, email: email, isEmailVerified: false, homeCity: homeCity, timezone: userTimezone)
             print("📧 Account created successfully! Please check your email to verify your account.")
             return user
         } catch {
@@ -95,7 +91,9 @@ class ViewModel: ObservableObject {
     func getUser(uid: String) async -> User? {
         do {
             let firestoreService = DatabaseManager()
-            return try await firestoreService.getUserFromFirestore(uid: uid)
+            let user = try await firestoreService.getUserFromFirestore(uid: uid)
+            self.signedInUser = user
+            return user
         } catch {
             print(error)
             return nil
@@ -109,14 +107,38 @@ class ViewModel: ObservableObject {
             let createdAt = Date()
             try await firestoreService.addChatbotToFirestore(id: id, name: name, subscribers: subscribers, schedules: schedules, creator: creator, createdAt: createdAt, planningStartDate: planningStartDate, planningEndDate: planningEndDate)
             
-            // Run all Firestore calls in parallel for better performance
+            // Create chats and send initial messages
             await withTaskGroup(of: Void.self) { group in
                 for username in subscribers {
                     if let user = users.first(where: { $0.username == username }) {
                         group.addTask {
-                            async let addSub = try? await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
-                            async let createChat = try? await firestoreService.createChat(chatbotId: id, userId: user.id)
-                            _ = await (addSub, createChat)
+                            do {
+                                // Add subscription and create chat
+                                try await firestoreService.addSubscriptionToUser(uid: user.id, chatbotId: id)
+                                let chatId = try await firestoreService.createChat(chatbotId: id, userId: user.id)
+                                
+                                // Send initial welcome message
+                                let welcomeMessage = await self.generateWelcomeMessage(
+                                    userName: user.fullname,
+                                    chatbotName: name,
+                                    planningStartDate: planningStartDate,
+                                    planningEndDate: planningEndDate
+                                )
+                                
+                                let message = Message(
+                                    id: UUID().uuidString,
+                                    text: welcomeMessage,
+                                    senderId: "chatbot",
+                                    timestamp: Date(),
+                                    side: "bot"
+                                )
+                                
+                                try await firestoreService.sendMessageToChat(chatId: chatId, message: message)
+                                print("✅ Sent welcome message to \(user.fullname)")
+                                
+                            } catch {
+                                print("❌ Error setting up chat for \(user.fullname): \(error)")
+                            }
                         }
                     }
                 }
@@ -124,17 +146,22 @@ class ViewModel: ObservableObject {
         } catch {
             print(error)
         }
+        await fetchAllChatbots()
+        await loadSignedInUser()
     }
     
-    
-    func getAllChatbots() async -> [Chatbot] {
+    func fetchAllChatbots() async {
         do {
             let firestoreService = DatabaseManager()
-            return try await firestoreService.getAllChatbots()
+            self.chatbots = try await firestoreService.getAllChatbots()
         } catch {
             print(error)
-            return []
+            self.chatbots = []
         }
+    }
+    
+    func fetchAllUsers() async {
+        self.users = await getAllUsers()
     }
     
     func getAllUsers() async -> [User] {
@@ -196,6 +223,46 @@ class ViewModel: ObservableObject {
             }
         } catch {
             print("Error deleting chatbot: \(error)")
+        }
+    }
+    
+    func leaveAgent(chatbotId: String) async -> (success: Bool, errorMessage: String?) {
+        guard let signedInUser = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            
+            // Remove user from chatbot subscribers
+            if let idx = chatbots.firstIndex(where: { $0.id == chatbotId }) {
+                var updatedChatbot = chatbots[idx]
+                updatedChatbot.subscribers.removeAll { $0 == signedInUser.username }
+                
+                // Update chatbot in database
+                let chatbotRef = firestoreService.db.collection("chatbots").document(chatbotId)
+                try await chatbotRef.updateData([
+                    "subscribers": updatedChatbot.subscribers
+                ])
+                
+                // Remove subscription from user in database
+                try await firestoreService.removeSubscriptionFromUser(uid: signedInUser.id, chatbotId: chatbotId)
+                
+                // Update local data
+                DispatchQueue.main.async {
+                    self.chatbots[idx] = updatedChatbot
+                    self.signedInUser?.subscriptions.removeAll { $0 == chatbotId }
+                    self.chats.removeAll { $0.chatbotID == chatbotId }
+                }
+                
+                return (true, nil)
+            } else {
+                return (false, "Agent not found")
+            }
+            
+        } catch {
+            print("Error leaving agent: \(error)")
+            return (false, "Failed to leave agent. Please try again.")
         }
     }
     
@@ -275,73 +342,6 @@ class ViewModel: ObservableObject {
             }
         } catch {
             print("Error loading signed in user: \(error)")
-        }
-    }
-    
-    func parseAgentResponse(response: String) -> ParsedAgentResponse {
-        var messageToUser = ""
-        var apiCalls: [ParsedToolCall] = []
-        
-        // Extract <response>...</response>
-        if let responseStart = response.range(of: "<response>"),
-           let responseEnd = response.range(of: "</response>") {
-            messageToUser = String(response[responseStart.upperBound..<responseEnd.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        // Extract all <api_call>...</api_call> blocks
-        let pattern = #"<api_call>\s*(\{[\s\S]*?\})\s*</api_call>"#
-        let regex = try? NSRegularExpression(pattern: pattern)
-        
-        let matches = regex?.matches(in: response, range: NSRange(response.startIndex..., in: response)) ?? []
-        
-        for match in matches {
-            if let range = Range(match.range(at: 1), in: response) {
-                let jsonString = String(response[range])
-                if let jsonData = jsonString.data(using: .utf8) {
-                    if let call = try? JSONDecoder().decode(ParsedToolCall.self, from: jsonData) {
-                        apiCalls.append(call)
-                    }
-                }
-            }
-        }
-        
-        return ParsedAgentResponse(messageToUser: messageToUser, apiCalls: apiCalls)
-    }
-    
-    func performParsedAPICalls(_ apiCalls: [ParsedToolCall], chatbot: Chatbot) async {
-        guard let sender = signedInUser else { return }
-
-        for call in apiCalls {
-            switch call.function {
-            case "text":
-                guard
-                    let recipientUsername = call.arguments["username"],
-                    let messageText = call.arguments["message"],
-                    let recipientUser = users.first(where: { $0.username == recipientUsername })
-                else {
-                    print("❌ Invalid text API call or recipient not found.")
-                    continue
-                }
-
-                guard let chat = await fetchOrCreateChat(userId: recipientUser.id, chatbotId: chatbot.id) else {
-                    print("❌ Could not fetch/create chat for recipient.")
-                    continue
-                }
-
-                // Check if this is an event card message
-                if let eventCardJson = call.arguments["eventCard"],
-                   let eventCardData = eventCardJson.data(using: .utf8),
-                   let eventCard = try? JSONDecoder().decode(EventCard.self, from: eventCardData) {
-                    print("📋 Sending message with event card: \(eventCard.activity)")
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot", eventCard: eventCard)
-                } else {
-                    await sendMessage(chat: chat, text: messageText, senderId: chatbot.id, side: "bot")
-                }
-
-            default:
-                print("⚠️ Unknown function: \(call.function)")
-            }
         }
     }
     
@@ -834,6 +834,32 @@ class ViewModel: ObservableObject {
         }
     }
     
+    func updateTimezone(timezone: String) async -> (success: Bool, errorMessage: String?) {
+        guard let user = signedInUser else {
+            return (false, "No user signed in")
+        }
+        
+        // Validate timezone
+        guard TimezoneHelper.isValidTimezone(timezone) else {
+            return (false, "Invalid timezone identifier")
+        }
+        
+        do {
+            let firestoreService = DatabaseManager()
+            try await firestoreService.updateUserTimezone(uid: user.id, timezone: timezone)
+            
+            // Update local user object
+            DispatchQueue.main.async {
+                self.signedInUser?.timezone = timezone
+            }
+            
+            return (true, nil)
+        } catch {
+            print("Error updating timezone: \(error)")
+            return (false, error.localizedDescription)
+        }
+    }
+    
     // MARK: - Group Deletion
     func deleteGroup(groupId: String) async {
         do {
@@ -868,5 +894,39 @@ class ViewModel: ObservableObject {
             print("Error checking username uniqueness: \(error)")
             return false // Assume not taken on error
         }
+    }
+    
+    // Generate welcome message for new chatbot
+    private func generateWelcomeMessage(userName: String, chatbotName: String, planningStartDate: Date?, planningEndDate: Date?) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        
+        // Format the date range
+        let dateRangeText: String
+        if let startDate = planningStartDate, let endDate = planningEndDate {
+            let calendar = Calendar.current
+            if calendar.isDate(startDate, inSameDayAs: endDate) {
+                // Same day
+                dateRangeText = "on \(formatter.string(from: startDate))"
+            } else {
+                // Date range
+                dateRangeText = "between \(formatter.string(from: startDate)) and \(formatter.string(from: endDate))"
+            }
+        } else if let startDate = planningStartDate {
+            dateRangeText = "starting \(formatter.string(from: startDate))"
+        } else if let endDate = planningEndDate {
+            dateRangeText = "by \(formatter.string(from: endDate))"
+        } else {
+            dateRangeText = "soon"
+        }
+        
+        return """
+Hi \(userName)! 👋
+
+I'm your hangout planning assistant! I'm here to help coordinate a fun get-together for your group \(dateRangeText).
+
+I'll be gathering everyone's availability and preferences. To get started, could you let me know if and when you're available during this time period? 😊
+"""
     }
 }

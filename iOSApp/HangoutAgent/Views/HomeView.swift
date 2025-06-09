@@ -54,11 +54,11 @@ struct HomeView: View {
                 }
                 .sheet(isPresented: $showCreateChatbot) {
                     CreateChatbotView()
-                        .environmentObject(vm)
                 }
             }
         } else {
-            ProgressView()
+            Text("Please sign in to continue")
+                .foregroundColor(.gray)
         }
     }
 }

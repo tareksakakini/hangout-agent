@@ -14,7 +14,7 @@ class DatabaseManager {
     
     // MARK: - Add Functions
     
-    func addUserToFirestore(uid: String, fullname: String, username: String, email: String, homeCity: String? = nil) async throws {
+    func addUserToFirestore(uid: String, fullname: String, username: String, email: String, homeCity: String? = nil, timezone: String? = nil) async throws {
         let userRef = db.collection("users").document(uid)
         
         var userData: [String: Any] = [
@@ -31,6 +31,11 @@ class DatabaseManager {
             userData["homeCity"] = homeCity
         }
         
+        // Add timezone if provided
+        if let timezone = timezone, !timezone.isEmpty {
+            userData["timezone"] = timezone
+        }
+        
         do {
             try await userRef.setData(userData)
             print("User added successfully!")
@@ -44,13 +49,6 @@ class DatabaseManager {
         let chatbotRef = db.collection("chatbots").document(id)
         
         let schedulesData: [String: Any] = [
-            "availabilityMessageSchedule": [
-                "dayOfWeek": schedules.availabilityMessageSchedule.dayOfWeek as Any,
-                "specificDate": schedules.availabilityMessageSchedule.specificDate as Any,
-                "hour": schedules.availabilityMessageSchedule.hour,
-                "minute": schedules.availabilityMessageSchedule.minute,
-                "timeZone": schedules.availabilityMessageSchedule.timeZone
-            ],
             "suggestionsSchedule": [
                 "dayOfWeek": schedules.suggestionsSchedule.dayOfWeek as Any,
                 "specificDate": schedules.suggestionsSchedule.specificDate as Any,
@@ -142,17 +140,8 @@ class DatabaseManager {
                 // Parse schedules if they exist
                 var schedules: ChatbotSchedules? = nil
                 if let schedulesData = data["schedules"] as? [String: Any] {
-                    if let availabilityData = schedulesData["availabilityMessageSchedule"] as? [String: Any],
-                       let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
+                    if let suggestionsData = schedulesData["suggestionsSchedule"] as? [String: Any],
                        let finalPlanData = schedulesData["finalPlanSchedule"] as? [String: Any] {
-                        
-                        let availabilitySchedule = AgentSchedule(
-                            dayOfWeek: availabilityData["dayOfWeek"] as? Int,
-                            specificDate: availabilityData["specificDate"] as? String,
-                            hour: availabilityData["hour"] as? Int ?? 10,
-                            minute: availabilityData["minute"] as? Int ?? 0,
-                            timeZone: availabilityData["timeZone"] as? String ?? "America/Los_Angeles"
-                        )
                         
                         let suggestionsSchedule = AgentSchedule(
                             dayOfWeek: suggestionsData["dayOfWeek"] as? Int,
@@ -171,7 +160,6 @@ class DatabaseManager {
                         )
                         
                         schedules = ChatbotSchedules(
-                            availabilityMessageSchedule: availabilitySchedule,
                             suggestionsSchedule: suggestionsSchedule,
                             finalPlanSchedule: finalPlanSchedule
                         )
@@ -202,6 +190,20 @@ class DatabaseManager {
             print("Subscription added successfully!")
         } catch {
             print("Error adding subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func removeSubscriptionFromUser(uid: String, chatbotId: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "subscriptions": FieldValue.arrayRemove([chatbotId])
+            ])
+            print("Subscription removed successfully!")
+        } catch {
+            print("Error removing subscription: \(error.localizedDescription)")
             throw error
         }
     }
@@ -499,6 +501,20 @@ class DatabaseManager {
             print("✅ Home city updated successfully!")
         } catch {
             print("❌ Error updating home city: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    func updateUserTimezone(uid: String, timezone: String) async throws {
+        let userRef = db.collection("users").document(uid)
+        
+        do {
+            try await userRef.updateData([
+                "timezone": timezone
+            ])
+            print("✅ User timezone updated successfully!")
+        } catch {
+            print("❌ Error updating user timezone: \(error.localizedDescription)")
             throw error
         }
     }

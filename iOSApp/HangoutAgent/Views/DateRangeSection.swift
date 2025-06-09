@@ -16,7 +16,7 @@ struct DateRangeSection: View {
                     .foregroundColor(.primary)
             }
             
-            Text("Set the date range for which the agent will coordinate plans (instead of just weekends)")
+            Text("Set the date range for which the agent will coordinate plans")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.secondary)
                 .lineLimit(nil)

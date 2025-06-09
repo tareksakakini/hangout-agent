@@ -1,1093 +1,1245 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const OpenAI = require('openai');
-const prompts = require('./prompts');
+const { OpenAI } = require('openai');
 
-const DEBUG_PAUSE_IMAGE_GEN = true; // Set to false to enable DALL·E image generation
-
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
+admin.initializeApp();
+const db = admin.firestore();
 
 const openai = new OpenAI({
-  apiKey: functions.config().openai.key,
+  apiKey: process.env.OPENAI_API_KEY || functions.config().openai?.key,
 });
 
-// Add a collection of fallback image URLs by activity type
-const FALLBACK_IMAGES = {
-  default: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/default_event.jpg?alt=media",
-  dining: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/dining.jpg?alt=media",
-  hiking: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/hiking.jpg?alt=media", 
-  movie: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/movie.jpg?alt=media",
-  concert: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/concert.jpg?alt=media",
-  beach: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/beach.jpg?alt=media",
-  park: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/park.jpg?alt=media",
-  coffee: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/coffee.jpg?alt=media",
-  sports: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/sports.jpg?alt=media",
-  bowling: "https://firebasestorage.googleapis.com/v0/b/hangout-app-123.appspot.com/o/bowling.jpg?alt=media"
-};
-
-function getFallbackImageForActivity(activity) {
-  const activityLower = activity.toLowerCase();
-  
-  // Check for relevant keywords in the activity
-  if (activityLower.includes('dinner') || activityLower.includes('lunch') || 
-      activityLower.includes('brunch') || activityLower.includes('restaurant')) {
-    return FALLBACK_IMAGES.dining;
-  } else if (activityLower.includes('hike') || activityLower.includes('hiking') || 
-             activityLower.includes('trail')) {
-    return FALLBACK_IMAGES.hiking;
-  } else if (activityLower.includes('movie') || activityLower.includes('cinema') || 
-             activityLower.includes('film')) {
-    return FALLBACK_IMAGES.movie;
-  } else if (activityLower.includes('concert') || activityLower.includes('music') || 
-             activityLower.includes('show')) {
-    return FALLBACK_IMAGES.concert;
-  } else if (activityLower.includes('beach') || activityLower.includes('ocean') || 
-             activityLower.includes('coast')) {
-    return FALLBACK_IMAGES.beach;
-  } else if (activityLower.includes('park') || activityLower.includes('garden') || 
-             activityLower.includes('picnic')) {
-    return FALLBACK_IMAGES.park;
-  } else if (activityLower.includes('coffee') || activityLower.includes('cafe') || 
-             activityLower.includes('tea')) {
-    return FALLBACK_IMAGES.coffee;
-  } else if (activityLower.includes('sport') || activityLower.includes('game') || 
-             activityLower.includes('play')) {
-    return FALLBACK_IMAGES.sports;
-  } else if (activityLower.includes('bowl') || activityLower.includes('bowling')) {
-    return FALLBACK_IMAGES.bowling;
+// Function to generate the system prompt
+async function generateSystemPrompt(chatId) {
+  const chatDoc = await db.collection('chats').doc(chatId).get();
+  const chatData = chatDoc.data();
+  if (!chatData) {
+    throw new Error(`Chat with ID ${chatId} not found.`);
   }
-  
-  return FALLBACK_IMAGES.default;
-}
+  const chatbotId = chatData.chatbotId;
+  const userId = chatData.userId;
 
-async function sendMessagesToSubscribers() {
-  console.log('Function started at:', new Date().toISOString());
-  const db = admin.firestore();
+  console.log(`Chat data:`, chatData);
+  console.log(`Chatbot ID: ${chatbotId}, User ID: ${userId}`);
 
-  try {
-    const chatbotsSnapshot = await db.collection('chatbots').get();
-    console.log(`Found ${chatbotsSnapshot.size} chatbots`);
-
-    for (const chatbotDoc of chatbotsSnapshot.docs) {
-      const chatbot = chatbotDoc.data();
-      console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
-
-      // Check if this chatbot should send availability messages now
-      if (chatbot.schedules && chatbot.schedules.availabilityMessageSchedule) {
-        const schedule = chatbot.schedules.availabilityMessageSchedule;
-        
-        // Create a date object representing the current time in the chatbot's timezone
-        const nowInTimezone = new Date().toLocaleString('en-US', {
-          timeZone: schedule.timeZone
-        });
-        const timezoneDate = new Date(nowInTimezone);
-        
-        // Get the current day, hour, and minute in the timezone
-        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
-        const currentHour = timezoneDate.getHours();
-        const currentMinute = timezoneDate.getMinutes();
-        
-        // Format current date as YYYY-MM-DD for comparison
-        const currentDateString = timezoneDate.toISOString().split('T')[0];
-        
-        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-        
-        let shouldRun = false;
-        let executionKey = '';
-        
-        // Check if we should run based on specific date or day of week
-        if (schedule.specificDate) {
-          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-          
-          // Check if current date matches specific date and time
-          const isScheduledDate = currentDateString === schedule.specificDate;
-          const isScheduledHour = currentHour === schedule.hour;
-          const isScheduledMinute = currentMinute === schedule.minute;
-          
-          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
-          executionKey = `${chatbot.id}_availability_${schedule.specificDate}`;
-          
-          if (!shouldRun) {
-            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-          }
-        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
-          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-          
-          // Legacy day-of-week scheduling
-          const isScheduledDay = currentDay === schedule.dayOfWeek;
-          const isScheduledHour = currentHour === schedule.hour;
-          const isScheduledMinute = currentMinute === schedule.minute;
-          
-          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
-          executionKey = `${chatbot.id}_availability_${currentDateString}`;
-          
-          if (!shouldRun) {
-            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for availability messages now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-          }
-        } else {
-          console.log(`Skipping chatbot ${chatbot.name} - no valid schedule configuration`);
-          continue;
-        }
-        
-        if (!shouldRun) {
-          continue;
-        }
-        
-        // Check if we've already executed this function for this chatbot today
-        const executionRef = db.collection('function_executions').doc(executionKey);
-        const executionDoc = await executionRef.get();
-        
-        if (executionDoc.exists) {
-          console.log(`Skipping chatbot ${chatbot.name} - availability function already executed for this date`);
-          continue;
-        }
-        
-        console.log(`Processing chatbot ${chatbot.name} - scheduled for availability messages now`);
-        
-        // Mark this execution as completed
-        await executionRef.set({
-          chatbotId: chatbot.id,
-          functionType: 'availability',
-          executedAt: admin.firestore.Timestamp.now(),
-          date: schedule.specificDate || currentDateString
-        });
-      } else {
-        console.log(`Skipping chatbot ${chatbot.name} - no availability schedule configured`);
-        continue;
-      }
-
-      for (const subscriberUsername of chatbot.subscribers) {
-        const usersSnapshot = await db.collection('users')
-          .where('username', '==', subscriberUsername)
-          .get();
-
-        if (usersSnapshot.empty) continue;
-
-        const userDoc = usersSnapshot.docs[0];
-        const user = userDoc.data();
-        const firstName = user.fullname.split(' ')[0];
-
-        let aiMessage;
-        try {
-          // Always use chatbot.planningStartDate and chatbot.planningEndDate for dateRangeText
-          const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
-          const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
-          const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-          const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-          const dateRangeText = `${startDateString} to ${endDateString}`;
-
-          // Use prompt module for availability message
-          const { system, user } = prompts.getAvailabilityPrompt(firstName, dateRangeText);
-          // Log the prompt being sent to OpenAI
-          console.log('=== AVAILABILITY MESSAGE OPENAI PROMPT DEBUG ===');
-          console.log('System Message:', system);
-          console.log('User Message:', user);
-          console.log('=== END AVAILABILITY PROMPT DEBUG ===');
-
-          // Build the OpenAI payload
-          const openaiPayload = {
-            model: "gpt-4",
-            messages: [
-              {
-                role: "system",
-                content: system
-              },
-              {
-                role: "user",
-                content: user
-              }
-            ],
-            temperature: 0.8
-          };
-          // Log the full payload
-          console.log('=== AVAILABILITY MESSAGE OPENAI FULL PAYLOAD ===');
-          console.log(JSON.stringify(openaiPayload, null, 2));
-          console.log('=== END AVAILABILITY PAYLOAD ===');
-
-          const completion = await openai.chat.completions.create(openaiPayload);
-
-          // Log the full completion object
-          console.log('=== AVAILABILITY MESSAGE OPENAI FULL COMPLETION ===');
-          console.log(JSON.stringify(completion, null, 2));
-          console.log('=== END AVAILABILITY COMPLETION ===');
-
-          aiMessage = completion.choices[0].message.content.trim();
-          
-          // Log the response received from OpenAI
-          console.log('=== AVAILABILITY MESSAGE OPENAI RESPONSE DEBUG ===');
-          console.log('Full OpenAI Response:', aiMessage);
-          console.log('Response Length:', aiMessage.length);
-          console.log('=== END AVAILABILITY RESPONSE DEBUG ===');
-        } catch (err) {
-          console.error(`Error generating message for ${firstName}:`, err);
-          continue;
-        }
-
-        const message = {
-          id: admin.firestore.Timestamp.now().toMillis().toString(),
-          text: aiMessage,
-          senderId: chatbot.id,
-          timestamp: admin.firestore.Timestamp.now(),
-          side: 'bot'
-        };
-
-        const chatsSnapshot = await db.collection('chats')
-          .where('userId', '==', userDoc.id)
-          .where('chatbotId', '==', chatbot.id)
-          .get();
-
-        let chatId;
-        if (chatsSnapshot.empty) {
-          const newChatRef = await db.collection('chats').add({
-            userId: userDoc.id,
-            chatbotId: chatbot.id,
-            lastMessage: message.text,
-            updatedAt: admin.firestore.Timestamp.now()
-          });
-          chatId = newChatRef.id;
-        } else {
-          const chatRef = chatsSnapshot.docs[0].ref;
-          chatId = chatRef.id;
-          await chatRef.update({
-            lastMessage: message.text,
-            updatedAt: admin.firestore.Timestamp.now()
-          });
-        }
-
-        await db.collection('chats').doc(chatId).collection('messages').add(message);
-      }
-    }
-
-    console.log('Messages sent successfully');
-    return null;
-  } catch (error) {
-    console.error('Error sending messages:', error);
-    throw error;
+  // Fetch chatbot details
+  const chatbotDoc = await db.collection('chatbots').doc(chatbotId).get();
+  const chatbotData = chatbotDoc.data();
+  if (!chatbotData) {
+    throw new Error(`Chatbot with ID ${chatbotId} not found.`);
   }
-}
+  const chatbotName = chatbotData.name;
+  const subscribers = chatbotData.subscribers || [];
+  const planningStartDate = chatbotData.planningStartDate;
+  const planningEndDate = chatbotData.planningEndDate;
 
-async function checkUserAvailability(messages, dateRangeText = "the planned dates") {
-  try {
-    const formattedMessages = messages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
+  console.log(`Chatbot data:`, chatbotData);
+  console.log(`Subscribers:`, subscribers);
+
+  // Fetch user details
+  const userDoc = await db.collection('users').doc(userId).get();
+  const userData = userDoc.data();
+  if (!userData) {
+    throw new Error(`User with ID ${userId} not found.`);
+  }
+  const userName = userData.fullname;
+  const userUsername = userData.username;
+  const userTimezone = userData.timezone || 'UTC'; // Default to UTC if no timezone stored
+
+  console.log(`User data:`, userData);
+  console.log(`User timezone: ${userTimezone}`);
+
+  // Generate date and time in user's timezone
+  const now = new Date();
+  const today = now.toLocaleDateString('en-CA', { timeZone: userTimezone }); // YYYY-MM-DD format
+  const currentTime = now.toLocaleTimeString('en-US', { 
+    timeZone: userTimezone,
+    hour12: true,
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+
+  // Format planning date range in user's timezone
+  let planningDateRange = 'No specific date range set';
+  if (planningStartDate && planningEndDate) {
+    const startDate = planningStartDate.toDate();
+    const endDate = planningEndDate.toDate();
     
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You analyze conversations and determine if a user has indicated they are not available for the planned hangout dates. Return ONLY 'available' or 'not available' based on your analysis."
-        },
-        {
-          role: "user",
-          content: `Conversation history:\n${formattedMessages}\n\nBased on this conversation, has the user clearly indicated they are NOT available for ${dateRangeText}?`
-        }
-      ],
-      temperature: 0.1
-    });
-
-    const response = completion.choices[0].message.content.trim().toLowerCase();
-    return response.includes('not available');
-  } catch (error) {
-    console.error('Error checking user availability:', error);
-    return false; // Default to assuming they're available if there's an error
-  }
-}
-
-async function getImageForActivity(activity) {
-  if (DEBUG_PAUSE_IMAGE_GEN) {
-    console.log('DEBUG: Image generation is paused. Returning fallback image.');
-    return getFallbackImageForActivity(activity);
-  }
-  try {
-    console.log(`Generating image for activity: ${activity}`);
-    
-    // Set a timeout for the image generation (20 seconds)
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Image generation timed out')), 20000)
-    );
-    
-    const imagePromise = openai.images.generate({
-      model: "dall-e-3",
-      prompt: `Create a vibrant, appealing image representing a group of friends enjoying this activity: ${activity}. Show people having fun in a clean, well-lit environment. No text overlay. Lifestyle photography style.`,
-      n: 1,
-      size: "1024x1024",
+    const formattedStartDate = startDate.toLocaleDateString('en-US', { 
+      timeZone: userTimezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     });
     
-    // Race the image generation against the timeout
-    const completion = await Promise.race([imagePromise, timeoutPromise]);
-    
-    console.log('Successfully generated image');
-    return completion.data[0].url;
-  } catch (error) {
-    console.error('Error generating image:', error);
-    console.error('Error details:', JSON.stringify(error));
-    console.log('Using fallback image for activity');
-    return getFallbackImageForActivity(activity);
-  }
-}
-
-async function parseEventDetails(text) {
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "Extract the structured details from the event description. Your response must ONLY contain a valid JSON object with no additional text or markdown formatting."
-        },
-        {
-          role: "user",
-          content: `Extract the following details from this event description as a JSON object with these keys: 
-          "activity" (the main activity), 
-          "location" (the specific location/address), 
-          "date" (format: YYYY-MM-DD), 
-          "startTime" (format: HH:MM), 
-          "endTime" (format: HH:MM), 
-          "description" (a brief 1-2 sentence description).
-          
-          Here's the event text:
-          ${text}
-          
-          Return ONLY the JSON object with no additional explanation or markdown formatting.`
-        }
-      ],
-      temperature: 0.1
+    const formattedEndDate = endDate.toLocaleDateString('en-US', { 
+      timeZone: userTimezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     });
-
-    const content = completion.choices[0].message.content.trim();
-    // Extract JSON even if there's unexpected text around it
-    const jsonMatch = content.match(/(\{.*\})/s);
-    if (jsonMatch && jsonMatch[0]) {
-      return JSON.parse(jsonMatch[0]);
-    }
     
-    // Fallback if we can't extract JSON
-    return {
-      activity: text.substring(0, 50),
-      location: "See description for details",
-      date: "TBD",
-      startTime: "TBD",
-      endTime: "TBD",
-      description: text
-    };
-  } catch (error) {
-    console.error('Error parsing event details:', error);
-    // Return a default format if parsing fails
-    return {
-      activity: text.substring(0, 50),
-      location: "See description for details",
-      date: "TBD",
-      startTime: "TBD",
-      endTime: "TBD",
-      description: text
-    };
-  }
-}
-
-async function createEventCard(eventData) {
-  try {
-    console.log(`Creating event card for activity: ${eventData.activity}`);
-    const imageUrl = await getImageForActivity(eventData.activity);
-    
-    return {
-      type: "eventCard",
-      activity: eventData.activity,
-      location: eventData.location,
-      date: eventData.date,
-      startTime: eventData.startTime,
-      endTime: eventData.endTime,
-      description: eventData.description,
-      imageUrl: imageUrl || getFallbackImageForActivity(eventData.activity),
-    };
-  } catch (error) {
-    console.error('Error creating event card:', error);
-    // Return a card with fallback image if there's an error
-    return {
-      type: "eventCard",
-      activity: eventData.activity,
-      location: eventData.location,
-      date: eventData.date,
-      startTime: eventData.startTime,
-      endTime: eventData.endTime,
-      description: eventData.description,
-      imageUrl: getFallbackImageForActivity(eventData.activity),
-    };
-  }
-}
-
-async function analyzeChatsAndSuggestOutings() {
-  console.log('Starting analyzeChatsAndSuggestOutings function');
-  const db = admin.firestore();
-  
-  try {
-    console.log('Fetching chatbots');
-    const chatbotsSnapshot = await db.collection('chatbots').get();
-    console.log(`Found ${chatbotsSnapshot.size} chatbots`);
-
-    for (const chatbotDoc of chatbotsSnapshot.docs) {
-      const chatbot = chatbotDoc.data();
-      console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
-      
-      // Guard against missing date fields
-      if (!chatbot.planningStartDate || !chatbot.planningEndDate) {
-        console.error(`Chatbot ${chatbot.name} (${chatbot.id}) is missing planningStartDate or planningEndDate. Skipping.`);
-        continue;
-      }
-
-      // Always define date range variables at the top of the loop
-      const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
-      const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
-      const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-      const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-      const startDateFormatted = startDate.toISOString().split('T')[0];
-      const endDateFormatted = endDate.toISOString().split('T')[0];
-      const dateRangeText = `${startDateString} to ${endDateString}`;
-      const dateContext = `\n\nPlanning Date Range: ${startDateString} to ${endDateString}\nDate Format Instructions:\n- Use dates between ${startDateFormatted} and ${endDateFormatted} (YYYY-MM-DD format)\n- Distribute suggestions across the available dates in this range\n- Consider different days within the range for variety`;
-      
-      // Check if this chatbot should send suggestions now
-      if (chatbot.schedules && chatbot.schedules.suggestionsSchedule) {
-        const schedule = chatbot.schedules.suggestionsSchedule;
-        
-        // Create a date object representing the current time in the chatbot's timezone
-        const nowInTimezone = new Date().toLocaleString('en-US', {
-          timeZone: schedule.timeZone
-        });
-        const timezoneDate = new Date(nowInTimezone);
-        
-        // Get the current day, hour, and minute in the timezone
-        const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
-        const currentHour = timezoneDate.getHours();
-        const currentMinute = timezoneDate.getMinutes();
-        
-        // Format current date as YYYY-MM-DD for comparison
-        const currentDateString = timezoneDate.toISOString().split('T')[0];
-        
-        console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-        
-        let shouldRun = false;
-        let executionKey = '';
-        
-        // Check if we should run based on specific date or day of week
-        if (schedule.specificDate) {
-          console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-          
-          // Check if current date matches specific date and time
-          const isScheduledDate = currentDateString === schedule.specificDate;
-          const isScheduledHour = currentHour === schedule.hour;
-          const isScheduledMinute = currentMinute === schedule.minute;
-          
-          shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
-          executionKey = `${chatbot.id}_suggestions_${schedule.specificDate}`;
-          
-          if (!shouldRun) {
-            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-          }
-        } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
-          console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-          
-          // Legacy day-of-week scheduling
-          const isScheduledDay = currentDay === schedule.dayOfWeek;
-          const isScheduledHour = currentHour === schedule.hour;
-          const isScheduledMinute = currentMinute === schedule.minute;
-          
-          shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
-          executionKey = `${chatbot.id}_suggestions_${currentDateString}`;
-          
-          if (!shouldRun) {
-            console.log(`Skipping chatbot ${chatbot.name} - not scheduled for suggestions now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-          }
-        } else {
-          console.log(`Skipping chatbot ${chatbot.name} - no valid suggestions schedule configuration`);
-          continue;
-        }
-        
-        if (!shouldRun) {
-          continue;
-        }
-        
-        // Check if we've already executed this function for this chatbot today
-        const executionRef = db.collection('function_executions').doc(executionKey);
-        const executionDoc = await executionRef.get();
-        
-        if (executionDoc.exists) {
-          console.log(`Skipping chatbot ${chatbot.name} - suggestions function already executed for this date`);
-          continue;
-        }
-        
-        console.log(`Processing chatbot ${chatbot.name} - scheduled for suggestions now`);
-        
-        // Mark this execution as completed
-        await executionRef.set({
-          chatbotId: chatbot.id,
-          functionType: 'suggestions',
-          executedAt: admin.firestore.Timestamp.now(),
-          date: schedule.specificDate || currentDateString
-        });
-      } else {
-        console.log(`Skipping chatbot ${chatbot.name} - no suggestions schedule configured`);
-        continue;
-      }
-
-      console.log(`Fetching chats for chatbot: ${chatbot.id}`);
-      const chatsSnapshot = await db.collection('chats')
-        .where('chatbotId', '==', chatbot.id)
-        .get();
-      console.log(`Found ${chatsSnapshot.size} chats for chatbot: ${chatbot.id}`);
-
-      let allMessages = [];
-      let unavailableUserIds = [];
-      let availableUserCities = [];
-      
-      // First pass to identify which users are unavailable and collect home cities
-      console.log('Starting to process individual chats and check user availability');
-      for (const chatDoc of chatsSnapshot.docs) {
-        const userId = chatDoc.data().userId;
-        console.log(`Processing chat with userId: ${userId}`);
-        
-        console.log(`Fetching messages for chat: ${chatDoc.id}`);
-        const messagesSnapshot = await chatDoc.ref.collection('messages')
-          .orderBy('timestamp', 'asc')
-          .get();
-        console.log(`Found ${messagesSnapshot.size} messages for chat: ${chatDoc.id}`);
-
-        const messages = messagesSnapshot.docs.map(doc => doc.data());
-        
-        // Check if user is available based on their messages
-        console.log(`Checking availability for user: ${userId}`);
-        try {
-          const isUnavailable = await checkUserAvailability(messages, dateRangeText);
-          if (isUnavailable) {
-            unavailableUserIds.push(userId);
-            console.log(`User ${userId} indicated they are not available`);
-          } else {
-            console.log(`User ${userId} appears to be available, adding their messages`);
-            allMessages = allMessages.concat(messages);
-            
-            // Get user's home city for available users
-            try {
-              const userDoc = await db.collection('users').doc(userId).get();
-              const user = userDoc.data();
-              if (user.homeCity && user.homeCity.trim() !== '') {
-                availableUserCities.push(user.homeCity);
-                console.log(`Added home city for available user ${userId}: ${user.homeCity}`);
-              }
-            } catch (error) {
-              console.error(`Error fetching user data for ${userId}:`, error);
-            }
-          }
-        } catch (error) {
-          console.error(`Error checking availability for user ${userId}:`, error);
-          // Default to keeping the user's messages
-          allMessages = allMessages.concat(messages);
-        }
-      }
-
-      console.log(`Total message count for analysis: ${allMessages.length}`);
-      console.log(`Unavailable users: ${unavailableUserIds.length}`);
-      console.log(`Available user cities: ${availableUserCities.join(', ')}`);
-      
-      if (allMessages.length === 0) {
-        console.log('No messages to analyze, skipping suggestion generation');
-        continue;
-      }
-      
-      const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
-      let promptMessages = formattedMessages;
-      if (formattedMessages.length > 15000) {
-        console.log('Warning: Conversation history is very long, truncating to avoid token limits');
-        promptMessages = formattedMessages.substring(0, 15000);
-        console.log('Truncated message length:', promptMessages.length);
-      }
-
-      // Prepare location context for the prompt
-      let locationContext = '';
-      if (availableUserCities.length > 0) {
-        const uniqueCities = [...new Set(availableUserCities)]; // Remove duplicates
-        locationContext = `\n\nSubscriber locations: The group members are located in/around: ${uniqueCities.join(', ')}. Please suggest activities in or near these areas.`;
-        console.log(`Location context for OpenAI: ${locationContext}`);
-      }
-
-      console.log('Calling OpenAI to generate suggestions');
-      try {
-        // Use prompt module for group suggestion prompt
-        const { system, user } = prompts.getSuggestionPrompt(
-          promptMessages,
-          availableUserCities,
-          dateRangeText,
-          dateContext
-        );
-        // Log the prompt being sent to OpenAI
-        console.log('=== OPENAI PROMPT DEBUG ===');
-        console.log('System Message:', system);
-        console.log('User Message:', user);
-        console.log('Prompt length:', user.length);
-        console.log('=== END PROMPT DEBUG ===');
-
-        // Build the OpenAI payload
-        const openaiPayload = {
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: system
-            },
-            {
-              role: "user",
-              content: user
-            }
-          ],
-          temperature: 0.8
-        };
-        // Log the full payload
-        console.log('=== SUGGESTION GENERATION OPENAI FULL PAYLOAD ===');
-        console.log(JSON.stringify(openaiPayload, null, 2));
-        console.log('=== END SUGGESTION PAYLOAD ===');
-
-        // Add timeoutPromise for OpenAI call
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('OpenAI API call timed out')), 30000)
-        );
-
-        const openAIPromise = openai.chat.completions.create(openaiPayload);
-        // Race the OpenAI call against the timeout
-        const completion = await Promise.race([openAIPromise, timeoutPromise]);
-
-        // Log the full completion object
-        console.log('=== SUGGESTION GENERATION OPENAI FULL COMPLETION ===');
-        console.log(JSON.stringify(completion, null, 2));
-        console.log('=== END SUGGESTION COMPLETION ===');
-
-        console.log('Successfully received suggestions from OpenAI');
-        const suggestionsText = completion.choices[0].message.content.trim();
-        
-        // Log the response received from OpenAI
-        console.log('=== OPENAI RESPONSE DEBUG ===');
-        console.log('Full OpenAI Response:', suggestionsText);
-        console.log('Response Length:', suggestionsText.length);
-        console.log('=== END RESPONSE DEBUG ===');
-        console.log('Suggestions text length:', suggestionsText.length);
-        const suggestionParagraphs = suggestionsText.split(/\n\n+/);
-        console.log(`Split into ${suggestionParagraphs.length} suggestion paragraphs`);
-        
-        // Parse each suggestion and create event cards
-        const eventCards = [];
-        for (let i = 0; i < suggestionParagraphs.length; i++) {
-          const paragraph = suggestionParagraphs[i];
-          if (paragraph.trim().length > 0) {
-            console.log(`Processing suggestion paragraph ${i+1}, length: ${paragraph.length}`);
-            try {
-              console.log('Parsing event details');
-              const eventData = await parseEventDetails(paragraph);
-              console.log('Getting image for activity:', eventData.activity);
-              const eventCard = await createEventCard(eventData);
-              eventCards.push(eventCard);
-              console.log(`Successfully created card for: ${eventData.activity}`);
-            } catch (error) {
-              console.error(`Error processing suggestion ${i+1}:`, error);
-            }
-          }
-        }
-        console.log(`Created ${eventCards.length} event cards`);
-
-        // Only send to users who are available
-        console.log('Sending suggestions to available users');
-        for (const chatDoc of chatsSnapshot.docs) {
-          const userId = chatDoc.data().userId;
-          
-          // Skip users who indicated they are not available
-          if (unavailableUserIds.includes(userId)) {
-            console.log(`Skipping suggestions for unavailable user ${userId}`);
-            continue;
-          }
-          
-          try {
-            console.log(`Fetching user data for ${userId}`);
-            const userDoc = await db.collection('users').doc(userId).get();
-            const user = userDoc.data();
-            
-            // Create an intro message
-            console.log(`Sending intro message to ${user.fullname}`);
-            const introMessage = {
-              id: admin.firestore.Timestamp.now().toMillis().toString(),
-              text: `Hey ${user.fullname.split(' ')[0]}! Based on our chat, here are some outing ideas for ${dateRangeText}:`,
-              senderId: chatbot.id,
-              timestamp: admin.firestore.Timestamp.now(),
-              side: 'bot'
-            };
-            await db.collection('chats').doc(chatDoc.id).collection('messages').add(introMessage);
-            
-            // Add each event card as a separate message
-            console.log(`Sending ${eventCards.length} event cards to ${user.fullname}`);
-            for (const eventCard of eventCards) {
-              const cardMessage = {
-                id: admin.firestore.Timestamp.now().toMillis().toString(),
-                eventCard: eventCard,
-                senderId: chatbot.id,
-                timestamp: admin.firestore.Timestamp.now(),
-                side: 'bot'
-              };
-              await db.collection('chats').doc(chatDoc.id).collection('messages').add(cardMessage);
-            }
-            
-            // Update the chat's last message
-            console.log(`Updating last message for chat ${chatDoc.id}`);
-            await chatDoc.ref.update({
-              lastMessage: `${eventCards.length} suggestions for ${dateRangeText}`,
-              updatedAt: admin.firestore.Timestamp.now()
-            });
-            console.log(`Successfully sent suggestions to ${user.fullname}`);
-          } catch (error) {
-            console.error(`Error sending suggestions to user ${userId}:`, error);
-          }
-        }
-      } catch (error) {
-        console.error('Error generating suggestions with OpenAI:', error);
-        console.error('Error details:', JSON.stringify(error));
-      }
-    }
-    console.log('analyzeChatsAndSuggestOutings completed successfully');
-  } catch (error) {
-    console.error('Error in analyzeChatsAndSuggestOutings:', error);
-    console.error('Error stack:', error.stack);
-    throw error;
-  }
-}
-
-async function analyzeResponsesAndSendFinalPlan() {
-  const db = admin.firestore();
-  const chatbotsSnapshot = await db.collection('chatbots').get();
-
-  for (const chatbotDoc of chatbotsSnapshot.docs) {
-    const chatbot = chatbotDoc.data();
-    console.log(`Processing chatbot: ${chatbot.name} (${chatbot.id})`);
-    
-    // Check if this chatbot should send final plan now
-    if (chatbot.schedules && chatbot.schedules.finalPlanSchedule) {
-      const schedule = chatbot.schedules.finalPlanSchedule;
-      
-      // Create a date object representing the current time in the chatbot's timezone
-      const nowInTimezone = new Date().toLocaleString('en-US', {
-        timeZone: schedule.timeZone
-      });
-      const timezoneDate = new Date(nowInTimezone);
-      
-      // Get the current day, hour, and minute in the timezone
-      const currentDay = timezoneDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
-      const currentHour = timezoneDate.getHours();
-      const currentMinute = timezoneDate.getMinutes();
-      
-      // Format current date as YYYY-MM-DD for comparison
-      const currentDateString = timezoneDate.toISOString().split('T')[0];
-      
-      console.log(`Chatbot ${chatbot.name} - Current time in ${schedule.timeZone}: ${currentDateString} ${currentHour}:${String(currentMinute).padStart(2, '0')}`);
-      
-      let shouldRun = false;
-      let executionKey = '';
-      
-      // Check if we should run based on specific date or day of week
-      if (schedule.specificDate) {
-        console.log(`Schedule: Specific date ${schedule.specificDate}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-        
-        // Check if current date matches specific date and time
-        const isScheduledDate = currentDateString === schedule.specificDate;
-        const isScheduledHour = currentHour === schedule.hour;
-        const isScheduledMinute = currentMinute === schedule.minute;
-        
-        shouldRun = isScheduledDate && isScheduledHour && isScheduledMinute;
-        executionKey = `${chatbot.id}_finalplan_${schedule.specificDate}`;
-        
-        if (!shouldRun) {
-          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Date: ${currentDateString}/${schedule.specificDate}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-        }
-      } else if (schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
-        console.log(`Schedule: Day ${schedule.dayOfWeek}, ${schedule.hour}:${String(schedule.minute).padStart(2, '0')}`);
-        
-        // Legacy day-of-week scheduling
-        const isScheduledDay = currentDay === schedule.dayOfWeek;
-        const isScheduledHour = currentHour === schedule.hour;
-        const isScheduledMinute = currentMinute === schedule.minute;
-        
-        shouldRun = isScheduledDay && isScheduledHour && isScheduledMinute;
-        executionKey = `${chatbot.id}_finalplan_${currentDateString}`;
-        
-        if (!shouldRun) {
-          console.log(`Skipping chatbot ${chatbot.name} - not scheduled for final plan now (Day: ${currentDay}/${schedule.dayOfWeek}, Time: ${currentHour}:${currentMinute}/${schedule.hour}:${schedule.minute})`);
-        }
-      } else {
-        console.log(`Skipping chatbot ${chatbot.name} - no valid final plan schedule configuration`);
-        continue;
-      }
-      
-      if (!shouldRun) {
-        continue;
-      }
-      
-      // Check if we've already executed this function for this chatbot today
-      const executionRef = db.collection('function_executions').doc(executionKey);
-      const executionDoc = await executionRef.get();
-      
-      if (executionDoc.exists) {
-        console.log(`Skipping chatbot ${chatbot.name} - final plan function already executed for this date`);
-        continue;
-      }
-      
-      console.log(`Processing chatbot ${chatbot.name} - scheduled for final plan now`);
-      
-      // Mark this execution as completed
-      await executionRef.set({
-        chatbotId: chatbot.id,
-        functionType: 'finalplan',
-        executedAt: admin.firestore.Timestamp.now(),
-        date: schedule.specificDate || currentDateString
-      });
+    if (startDate.toDateString() === endDate.toDateString()) {
+      // Same day
+      planningDateRange = formattedStartDate;
     } else {
-      console.log(`Skipping chatbot ${chatbot.name} - no final plan schedule configured`);
-      continue;
+      // Date range
+      planningDateRange = `${formattedStartDate} through ${formattedEndDate}`;
     }
+  }
 
-    const chatsSnapshot = await db.collection('chats')
-      .where('chatbotId', '==', chatbot.id)
-      .get();
+  console.log(`Planning date range: ${planningDateRange}`);
 
-    let allMessages = [];
-    let unavailableUserIds = [];
-    let availableUserNames = [];
-    let availableUserIds = [];
-    let originalSuggestions = [];
+  // Fetch details of users subscribed to this chatbot
+  const groupMembers = [];
+  for (const subscriberId of subscribers) {
+    console.log(`Fetching subscriber: ${subscriberId}`);
     
-    // Format date range for availability checking
-    let dateRangeText = "the upcoming weekend";
-    if (chatbot.planningStartDate && chatbot.planningEndDate) {
-      const startDate = new Date(chatbot.planningStartDate.seconds * 1000);
-      const endDate = new Date(chatbot.planningEndDate.seconds * 1000);
-      const startDateString = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-      const endDateString = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-      
-      if (startDate.getFullYear() !== endDate.getFullYear()) {
-        const startWithYear = startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-        const endWithYear = endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-        dateRangeText = `${startWithYear} to ${endWithYear}`;
-      } else {
-        dateRangeText = `${startDateString} to ${endDateString}`;
+    // First try fetching by document ID (assuming subscriberId is a user ID)
+    let subscriberDoc = await db.collection('users').doc(subscriberId).get();
+    let subscriberData = subscriberDoc.data();
+    
+    // If not found by ID, try querying by username
+    if (!subscriberData) {
+      console.log(`Subscriber not found by ID ${subscriberId}, trying username search...`);
+      const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+      if (!usernameQuery.empty) {
+        subscriberDoc = usernameQuery.docs[0];
+        subscriberData = subscriberDoc.data();
+        console.log(`Found subscriber by username: ${subscriberId}`);
       }
     }
     
-    // First pass to identify which users are unavailable and collect names of available users
-    for (const chatDoc of chatsSnapshot.docs) {
-      const userId = chatDoc.data().userId;
-      const messagesSnapshot = await chatDoc.ref.collection('messages')
-        .orderBy('timestamp', 'asc')
-        .get();
+    if (!subscriberData) {
+      console.error(`Subscriber with ID/username ${subscriberId} not found.`);
+      throw new Error(`Subscriber with ID/username ${subscriberId} not found.`);
+    }
+    if (!subscriberData.fullname || !subscriberData.username) {
+      console.error(`Subscriber ${subscriberId} missing required fields:`, subscriberData);
+      throw new Error(`Subscriber ${subscriberId} missing required fields (fullname or username).`);
+    }
+    groupMembers.push({
+      name: subscriberData.fullname,
+      username: subscriberData.username,
+      homeCity: subscriberData.homeCity || 'Unknown'
+    });
+    console.log(`Added subscriber: ${subscriberData.fullname} (${subscriberData.username})`);
+  }
 
-      const messages = messagesSnapshot.docs.map(doc => doc.data());
-      
-      // Check if user is available based on their messages
-      const isUnavailable = await checkUserAvailability(messages, dateRangeText);
-      
-      const userDoc = await db.collection('users').doc(userId).get();
-      const user = userDoc.data();
-      
-      if (isUnavailable) {
-        unavailableUserIds.push(userId);
-      } else {
-        availableUserNames.push(user.fullname);
-        availableUserIds.push(userId);
-        allMessages = allMessages.concat(messages);
-        
-        // Collect original suggestions from event cards
-        messages.forEach(msg => {
-          if (msg.eventCard && !originalSuggestions.some(s => s.activity === msg.eventCard.activity)) {
-            originalSuggestions.push(msg.eventCard);
-          }
+  console.log(`Group members:`, groupMembers);
+
+  // Create a mapping of user IDs to names for chat history
+  const userIdToNameMap = {};
+  
+  // Add current user to the mapping
+  userIdToNameMap[userId] = userName;
+  
+  // Add all subscribers to the mapping
+  for (const subscriberId of subscribers) {
+    let subscriberDoc = await db.collection('users').doc(subscriberId).get();
+    let subscriberData = subscriberDoc.data();
+    
+    if (!subscriberData) {
+      const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+      if (!usernameQuery.empty) {
+        subscriberDoc = usernameQuery.docs[0];
+        subscriberData = subscriberDoc.data();
+      }
+    }
+    
+    if (subscriberData && subscriberData.fullname) {
+      userIdToNameMap[subscriberDoc.id] = subscriberData.fullname;
+      userIdToNameMap[subscriberData.username] = subscriberData.fullname; // Handle both ID and username
+    }
+  }
+  
+  // Add chatbot to the mapping
+  userIdToNameMap['chatbot'] = chatbotName;
+  
+  console.log('User ID to Name mapping:', userIdToNameMap);
+
+  // Fetch chat history from all chats with this chatbot (excluding current user's chat)
+  const allChatsSnapshot = await db.collection('chats').where('chatbotId', '==', chatbotId).get();
+  const chatHistoryByUser = {};
+  
+  for (const chatDoc of allChatsSnapshot.docs) {
+    // Skip the current user's chat since it's included later
+    if (chatDoc.id === chatId) continue;
+    
+    const chatData = chatDoc.data();
+    const chatUserId = chatData.userId;
+    const chatUserName = userIdToNameMap[chatUserId] || `User ${chatUserId}`;
+    
+    const messagesSnapshot = await db.collection('chats').doc(chatDoc.id).collection('messages').orderBy('timestamp', 'asc').limit(10).get();
+    const userMessages = [];
+    
+    messagesSnapshot.docs.forEach(messageDoc => {
+      const data = messageDoc.data();
+      if (data.timestamp && data.text && data.senderId) {
+        const senderName = userIdToNameMap[data.senderId] || data.senderId;
+        userMessages.push({
+          sender: senderName,
+          text: data.text,
+          timestamp: data.timestamp.toDate()
         });
       }
+    });
+    
+    if (userMessages.length > 0) {
+      chatHistoryByUser[chatUserName] = userMessages;
     }
+  }
 
-    // If no suggestions were found or no available users, skip this chatbot
-    if (originalSuggestions.length === 0 || availableUserIds.length === 0) {
-      console.log('No original suggestions found or no available users, skipping final plan generation');
+  // Format chat history by user
+  const formattedChatHistory = Object.entries(chatHistoryByUser)
+    .map(([userName, messages]) => {
+      const messageList = messages
+        .map(msg => `  [${msg.timestamp.toLocaleString('en-US', { timeZone: userTimezone })}] ${msg.sender}: ${msg.text}`)
+        .join('\n');
+      return `${userName}'s conversation:\n${messageList}`;
+    })
+    .join('\n\n');
+
+  return `
+YOUR ROLE:
+    
+You are a friendly and helpful AI assistant coordinating hangouts for a group of friends. Your goal is to gather information about availability and preferences for the specified planning period. Your goal is not to suggest options.
+
+Group Members:
+${groupMembers.map(member => `- ${member.name} (${member.username}) from ${member.homeCity}`).join('\n')}
+
+PLANNING DATE RANGE: ${planningDateRange}
+
+Your job is to:
+1. Gather availability information for the planning date range: ${planningDateRange}
+2. Collect preferences about:
+    - Preferred timing (morning, afternoon, evening, or specific times)
+    - Location preferences or constraints
+    - Activity preferences (indoor/outdoor, active/relaxed, etc.)
+
+CONVERSATION GUIDELINES:
+1. Be friendly and conversational
+2. Ask one question at a time to avoid overwhelming users
+3. Don't be pushy - if a user does not express any preferences, wrap up the conversation and inform the user that they can share any preferences at any time in the future
+4. Acknowledge and validate preferences
+5. Reference the specific planning date range (${planningDateRange}) when asking about availability
+
+Current Date: ${today}
+Current Time: ${currentTime}
+
+Other Conversations:
+${formattedChatHistory || 'No other conversations yet.'}
+
+Current User:
+- ${userName} (${userUsername})
+`;
+}
+
+// Scheduled function to send suggestions
+exports.sendSuggestions = functions.pubsub.schedule('*/5 * * * *').onRun(async (context) => {
+  const now = new Date();
+  console.log(`🕐 Checking for chatbots ready to send suggestions at: ${now.toISOString()}`);
+  console.log(`📅 Current time breakdown - Year: ${now.getFullYear()}, Month: ${now.getMonth()}, Date: ${now.getDate()}, Hour: ${now.getHours()}, Minute: ${now.getMinutes()}, Day: ${now.getDay()}`);
+  
+  try {
+    const chatbotsSnapshot = await db.collection('chatbots').get();
+    console.log(`🔍 Found ${chatbotsSnapshot.docs.length} total chatbots to check`);
+    
+    for (const chatbotDoc of chatbotsSnapshot.docs) {
+      const chatbotData = chatbotDoc.data();
+      const chatbotId = chatbotData.id;
+      const chatbotName = chatbotData.name;
+      const schedules = chatbotData.schedules;
+      
+      console.log(`\n🤖 Checking chatbot: "${chatbotName}" (ID: ${chatbotId})`);
+      
+      if (!schedules) {
+        console.log(`❌ No schedules found for chatbot: ${chatbotName}`);
+        continue;
+      }
+      
+      if (!schedules.suggestionsSchedule) {
+        console.log(`❌ No suggestionsSchedule found for chatbot: ${chatbotName}`);
+        continue;
+      }
+      
+      const suggestionsSchedule = schedules.suggestionsSchedule;
+      console.log(`📋 Suggestions schedule for ${chatbotName}:`, JSON.stringify(suggestionsSchedule, null, 2));
+      
+      // Check if it's time to send suggestions
+      const shouldSend = await isTimeToSend(suggestionsSchedule, now);
+      console.log(`⏰ Time check result for ${chatbotName}: ${shouldSend}`);
+      
+      if (shouldSend) {
+        console.log(`✅ Processing suggestions for chatbot: ${chatbotName}`);
+        await processSuggestionsForChatbot(chatbotId, chatbotData);
+      }
+    }
+    
+    console.log(`🏁 Finished checking all chatbots`);
+  } catch (error) {
+    console.error('Error in sendSuggestions function:', error);
+  }
+});
+
+// Scheduled function to send final plan
+exports.sendFinalPlan = functions.pubsub.schedule('*/5 * * * *').onRun(async (context) => {
+  const now = new Date();
+  console.log(`🎯 Checking for chatbots ready to send final plan at: ${now.toISOString()}`);
+  
+  try {
+    const chatbotsSnapshot = await db.collection('chatbots').get();
+    console.log(`🔍 Found ${chatbotsSnapshot.docs.length} total chatbots to check for final plan`);
+    
+    for (const chatbotDoc of chatbotsSnapshot.docs) {
+      const chatbotData = chatbotDoc.data();
+      const chatbotId = chatbotData.id;
+      const chatbotName = chatbotData.name;
+      const schedules = chatbotData.schedules;
+      
+      console.log(`\n🎯 Checking chatbot for final plan: "${chatbotName}" (ID: ${chatbotId})`);
+      
+      if (!schedules) {
+        console.log(`❌ No schedules found for chatbot: ${chatbotName}`);
+        continue;
+      }
+      
+      if (!schedules.finalPlanSchedule) {
+        console.log(`❌ No finalPlanSchedule found for chatbot: ${chatbotName}`);
+        continue;
+      }
+      
+      const finalPlanSchedule = schedules.finalPlanSchedule;
+      console.log(`📋 Final plan schedule for ${chatbotName}:`, JSON.stringify(finalPlanSchedule, null, 2));
+      
+      // Check if it's time to send final plan
+      const shouldSend = await isTimeToSend(finalPlanSchedule, now);
+      console.log(`⏰ Time check result for final plan ${chatbotName}: ${shouldSend}`);
+      
+      if (shouldSend) {
+        console.log(`✅ Processing final plan for chatbot: ${chatbotName}`);
+        await processFinalPlanForChatbot(chatbotId, chatbotData);
+      }
+    }
+    
+    console.log(`🏁 Finished checking all chatbots for final plan`);
+  } catch (error) {
+    console.error('Error in sendFinalPlan function:', error);
+  }
+});
+
+// Helper function to check if it's time to send
+async function isTimeToSend(schedule, now) {
+  console.log(`🔍 Checking schedule:`, JSON.stringify(schedule, null, 2));
+  console.log(`🕐 Current time (UTC): ${now.toISOString()}`);
+  
+  const timeZone = schedule.timeZone || 'UTC';
+  console.log(`🌍 Using timezone: ${timeZone}`);
+  
+  // Convert current time to the schedule's timezone
+  const nowInTimeZone = new Date(now.toLocaleString("en-US", { timeZone: timeZone }));
+  console.log(`🕐 Current time in ${timeZone}: ${nowInTimeZone.toISOString()}`);
+  console.log(`🕐 Current time breakdown in ${timeZone} - Year: ${nowInTimeZone.getFullYear()}, Month: ${nowInTimeZone.getMonth()}, Date: ${nowInTimeZone.getDate()}, Hour: ${nowInTimeZone.getHours()}, Minute: ${nowInTimeZone.getMinutes()}, Day: ${nowInTimeZone.getDay()}`);
+  
+  if (schedule.specificDate) {
+    console.log(`📅 Using specific date schedule: ${schedule.specificDate}`);
+    
+    // Parse the date string and create a Date object in the schedule's timezone
+    const [year, month, day] = schedule.specificDate.split('-').map(Number);
+    const scheduleDate = new Date();
+    scheduleDate.setFullYear(year, month - 1, day); // month is 0-indexed
+    scheduleDate.setHours(schedule.hour, schedule.minute, 0, 0);
+    
+    console.log(`📅 Parsed schedule date: ${scheduleDate.toISOString()}`);
+    console.log(`🕐 Schedule time breakdown - Year: ${scheduleDate.getFullYear()}, Month: ${scheduleDate.getMonth()}, Date: ${scheduleDate.getDate()}, Hour: ${scheduleDate.getHours()}, Minute: ${scheduleDate.getMinutes()}`);
+    
+    const yearMatch = nowInTimeZone.getFullYear() === scheduleDate.getFullYear();
+    const monthMatch = nowInTimeZone.getMonth() === scheduleDate.getMonth();
+    const dateMatch = nowInTimeZone.getDate() === scheduleDate.getDate();
+    const hourMatch = nowInTimeZone.getHours() === scheduleDate.getHours();
+    const minuteMatch = nowInTimeZone.getMinutes() === scheduleDate.getMinutes();
+    
+    console.log(`🔍 Time comparison results (in ${timeZone}):`);
+    console.log(`   Year match: ${yearMatch} (${nowInTimeZone.getFullYear()} === ${scheduleDate.getFullYear()})`);
+    console.log(`   Month match: ${monthMatch} (${nowInTimeZone.getMonth()} === ${scheduleDate.getMonth()})`);
+    console.log(`   Date match: ${dateMatch} (${nowInTimeZone.getDate()} === ${scheduleDate.getDate()})`);
+    console.log(`   Hour match: ${hourMatch} (${nowInTimeZone.getHours()} === ${scheduleDate.getHours()})`);
+    console.log(`   Minute match: ${minuteMatch} (${nowInTimeZone.getMinutes()} === ${scheduleDate.getMinutes()})`);
+    
+    const result = yearMatch && monthMatch && dateMatch && hourMatch && minuteMatch;
+    console.log(`🎯 Final result for specific date: ${result}`);
+    return result;
+  }
+  
+  // For recurring schedules (day of week)
+  if (schedule.dayOfWeek !== null && schedule.dayOfWeek !== undefined) {
+    console.log(`📅 Using recurring day-of-week schedule: ${schedule.dayOfWeek}`);
+    
+    const dayMatch = nowInTimeZone.getDay() === schedule.dayOfWeek;
+    const hourMatch = nowInTimeZone.getHours() === schedule.hour;
+    const minuteMatch = nowInTimeZone.getMinutes() === schedule.minute;
+    
+    console.log(`🔍 Recurring schedule comparison results (in ${timeZone}):`);
+    console.log(`   Day match: ${dayMatch} (${nowInTimeZone.getDay()} === ${schedule.dayOfWeek})`);
+    console.log(`   Hour match: ${hourMatch} (${nowInTimeZone.getHours()} === ${schedule.hour})`);
+    console.log(`   Minute match: ${minuteMatch} (${nowInTimeZone.getMinutes()} === ${schedule.minute})`);
+    
+    const result = dayMatch && hourMatch && minuteMatch;
+    console.log(`🎯 Final result for recurring schedule: ${result}`);
+    return result;
+  }
+  
+  console.log(`❌ No valid schedule type found`);
+  return false;
+}
+
+// Process suggestions for a specific chatbot
+async function processSuggestionsForChatbot(chatbotId, chatbotData) {
+  try {
+    const chatbotName = chatbotData.name;
+    const subscribers = chatbotData.subscribers || [];
+    const planningStartDate = chatbotData.planningStartDate;
+    const planningEndDate = chatbotData.planningEndDate;
+    
+    console.log(`🔍 Analyzing chats for chatbot: ${chatbotName}`);
+    
+    // Fetch all chat histories for this chatbot
+    const allChatHistory = await fetchAllChatHistories(chatbotId, subscribers);
+    
+    // Call OpenAI to identify unavailable users
+    console.log('🤖 Identifying unavailable users...');
+    const unavailableUsers = await identifyUnavailableUsers(allChatHistory, planningStartDate, planningEndDate);
+    
+    // Get available users and their details
+    const availableUsers = await getAvailableUsersWithDetails(subscribers, unavailableUsers);
+    
+    if (availableUsers.length === 0) {
+      console.log('❌ No available users found for suggestions');
+      return;
+    }
+    
+    // Call OpenAI to generate suggestions
+    console.log('💡 Generating hangout suggestions...');
+    const eventCards = await generateHangoutSuggestions(allChatHistory, availableUsers, planningStartDate, planningEndDate);
+    
+    // Send suggestions to available users
+    console.log(`📤 Sending ${eventCards.length} event card suggestions to ${availableUsers.length} available users...`);
+    await sendSuggestionsToUsers(chatbotId, chatbotName, eventCards, availableUsers);
+    
+    console.log(`✅ Successfully processed suggestions for ${chatbotName}`);
+    
+  } catch (error) {
+    console.error(`Error processing suggestions for chatbot ${chatbotId}:`, error);
+  }
+}
+
+// Fetch all chat histories for a chatbot
+async function fetchAllChatHistories(chatbotId, subscribers) {
+  const allChats = {};
+  
+  // Get all chats for this chatbot
+  const chatsSnapshot = await db.collection('chats').where('chatbotId', '==', chatbotId).get();
+  
+  for (const chatDoc of chatsSnapshot.docs) {
+    const chatData = chatDoc.data();
+    const userId = chatData.userId;
+    
+    // Fetch messages for this chat
+    const messagesSnapshot = await db.collection('chats').doc(chatDoc.id).collection('messages')
+      .orderBy('timestamp', 'asc').get();
+    
+    const messages = [];
+    messagesSnapshot.docs.forEach(messageDoc => {
+      const data = messageDoc.data();
+      if (data.timestamp && data.text && data.senderId) {
+        messages.push({
+          sender: data.senderId,
+          text: data.text,
+          timestamp: data.timestamp.toDate(),
+          side: data.side || 'unknown'
+        });
+      }
+    });
+    
+    if (messages.length > 0) {
+      allChats[userId] = messages;
+    }
+  }
+  
+  return allChats;
+}
+
+// Use OpenAI to identify users who indicated unavailability
+async function identifyUnavailableUsers(chatHistory, planningStartDate, planningEndDate) {
+  const dateRange = formatDateRangeForPrompt(planningStartDate, planningEndDate);
+  
+  const prompt = `
+Analyze the following chat conversations to identify users who have clearly indicated they are NOT available for the hangout during ${dateRange}.
+
+Only include users who have explicitly stated unavailability, such as:
+- "I can't make it"
+- "I'm not available"
+- "I have other plans"
+- "I'll be traveling"
+- Clear schedule conflicts
+
+Do not include users who:
+- Haven't responded yet
+- Gave vague or uncertain responses
+- Only mentioned preferences without indicating unavailability
+- indicated unavailability for only a portion of the planning range
+
+Chat History:
+${JSON.stringify(chatHistory, null, 2)}
+
+Return ONLY a JSON array of user IDs who are unavailable. Example: ["user123", "user456"]
+If no users are clearly unavailable, return an empty array: []
+`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 200,
+      temperature: 0.1,
+    });
+
+    const response = completion.choices[0]?.message?.content?.trim();
+    const unavailableUsers = JSON.parse(response || '[]');
+    
+    console.log(`🚫 Identified ${unavailableUsers.length} unavailable users:`, unavailableUsers);
+    return unavailableUsers;
+    
+  } catch (error) {
+    console.error('Error identifying unavailable users:', error);
+    return [];
+  }
+}
+
+// Get available users with their details
+async function getAvailableUsersWithDetails(allSubscribers, unavailableUsers) {
+  const availableUsers = [];
+  
+  console.log(`👥 Processing ${allSubscribers.length} subscribers:`, allSubscribers);
+  console.log(`🚫 Unavailable user IDs:`, unavailableUsers);
+  
+  for (const subscriberId of allSubscribers) {
+    // Fetch user details first to get both ID and username
+    let userDoc = await db.collection('users').doc(subscriberId).get();
+    let userData = userDoc.data();
+    let actualUserId = subscriberId;
+    
+    // If not found by ID, try by username
+    if (!userData) {
+      const usernameQuery = await db.collection('users').where('username', '==', subscriberId).get();
+      if (!usernameQuery.empty) {
+        userDoc = usernameQuery.docs[0];
+        userData = userDoc.data();
+        actualUserId = userDoc.id; // Get the actual user ID
+        console.log(`📝 Subscriber "${subscriberId}" resolved to user ID: ${actualUserId}`);
+      }
+    }
+    
+    if (!userData) {
+      console.log(`❌ Could not find user data for subscriber: ${subscriberId}`);
       continue;
     }
-
-    const formattedMessages = allMessages.map(msg => `${msg.side === 'bot' ? 'Agent' : 'User'}: ${msg.text}`).join('\n');
     
-    // Format suggestions with their index numbers for reference
-    const formattedSuggestions = originalSuggestions.map((s, index) => 
-      `Option ${index + 1}:\nActivity: ${s.activity}\nLocation: ${s.location}\nDate: ${s.date}\nTime: ${s.startTime}-${s.endTime}\nDescription: ${s.description}`
-    ).join('\n\n');
-
-    // Use prompt module for final plan selection
-    const { system, user } = prompts.getFinalPlanPrompt(
-      formattedMessages,
-      availableUserNames,
-      dateRangeText,
-      formattedSuggestions
-    );
-    // Log the prompt being sent to OpenAI
-    console.log('=== FINAL PLAN SELECTION OPENAI PROMPT DEBUG ===');
-    console.log('System Message:', system);
-    console.log('User Message:', user);
-    console.log('=== END FINAL PLAN PROMPT DEBUG ===');
-
-    // Build the OpenAI payload
-    const openaiPayload = {
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: system
-        },
-        {
-          role: "user",
-          content: user
-        }
-      ],
-      temperature: 0.3
-    };
-    // Log the full payload
-    console.log('=== FINAL PLAN SELECTION OPENAI FULL PAYLOAD ===');
-    console.log(JSON.stringify(openaiPayload, null, 2));
-    console.log('=== END FINAL PLAN PAYLOAD ===');
-
-    const completion = await openai.chat.completions.create(openaiPayload);
-
-    // Log the full completion object
-    console.log('=== FINAL PLAN SELECTION OPENAI FULL COMPLETION ===');
-    console.log(JSON.stringify(completion, null, 2));
-    console.log('=== END FINAL PLAN COMPLETION ===');
-
-    const rawResponse = completion.choices[0].message.content.trim();
-    // Log the response received from OpenAI
-    console.log('=== FINAL PLAN SELECTION OPENAI RESPONSE DEBUG ===');
-    console.log('Full OpenAI Response:', rawResponse);
-    console.log('Response Length:', rawResponse.length);
-    console.log('=== END FINAL PLAN RESPONSE DEBUG ===');
-
-    let selectedIndex = parseInt(rawResponse) - 1;
+    // Check if this user is unavailable (compare against both ID and username)
+    const isUnavailable = unavailableUsers.includes(actualUserId) || unavailableUsers.includes(userData.username);
     
-    // Validate the selection
-    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= originalSuggestions.length) {
-      console.error('Invalid selection from AI, defaulting to first suggestion');
-      selectedIndex = 0;
+    console.log(`🔍 Checking availability for ${userData.fullname} (ID: ${actualUserId}, Username: ${userData.username})`);
+    console.log(`   - Unavailable by ID: ${unavailableUsers.includes(actualUserId)}`);
+    console.log(`   - Unavailable by username: ${unavailableUsers.includes(userData.username)}`);
+    console.log(`   - Final result: ${isUnavailable ? 'UNAVAILABLE' : 'AVAILABLE'}`);
+    
+    if (isUnavailable) {
+      console.log(`🚫 Skipping unavailable user: ${userData.fullname}`);
+      continue;
     }
-
-    // Use the selected suggestion as the final plan
-    const finalEventCard = originalSuggestions[selectedIndex];
-    finalEventCard.attendees = availableUserNames;
-
-    // Create a group for the attendees
-    const groupId = `group_${chatbot.id}_${admin.firestore.Timestamp.now().toMillis()}`;
-    const groupName = `${finalEventCard.activity} Group`;
     
+    availableUsers.push({
+      id: actualUserId,
+      name: userData.fullname,
+      username: userData.username,
+      homeCity: userData.homeCity || 'Unknown'
+    });
+    
+    console.log(`✅ Added available user: ${userData.fullname}`);
+  }
+  
+  console.log(`📊 Final result: ${availableUsers.length} available users out of ${allSubscribers.length} total subscribers`);
+  return availableUsers;
+}
+
+// Use OpenAI to generate hangout suggestions as structured event cards
+async function generateHangoutSuggestions(chatHistory, availableUsers, planningStartDate, planningEndDate) {
+  const dateRange = formatDateRangeForPrompt(planningStartDate, planningEndDate);
+  const userLocations = availableUsers.map(user => `${user.name} from ${user.homeCity}`).join(', ');
+  const attendeeNames = availableUsers.map(user => user.name);
+  
+  // Generate specific dates within the planning range
+  const suggestedDates = generateSuggestedDates(planningStartDate, planningEndDate);
+  
+  const prompt = `
+Based on the chat history and user information, generate 5 specific hangout suggestions for ${dateRange}.
+
+Available Users: ${userLocations}
+Attendees: ${attendeeNames.join(', ')}
+
+Chat History (contains preferences and availability info):
+${JSON.stringify(chatHistory, null, 2)}
+
+Please consider:
+- User preferences mentioned in the chats
+- Geographic locations of users
+- Time preferences (morning, afternoon, evening)
+- Activity types mentioned (indoor/outdoor, active/relaxed, etc.)
+- Accessibility for all participants
+
+IMPORTANT: Return ONLY a valid JSON array with exactly 5 event objects. Each object must have these exact fields:
+- type: "hangout_suggestion"
+- activity: String (the main activity name, 2-4 words max)
+- location: String (specific venue or area name)
+- date: String (format: YYYY-MM-DD, pick from: ${suggestedDates.join(', ')})
+- startTime: String (format: "HH:MM AM/PM")
+- endTime: String (format: "HH:MM AM/PM", 2-4 hours after start)
+- description: String (2-3 sentences describing the activity and why it would be fun)
+- imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop" (use this exact URL for all events)
+
+DO NOT include an "attendees" field in suggestions - attendees will be determined later based on responses.
+
+Example format:
+[
+  {
+    "type": "hangout_suggestion",
+    "activity": "Coffee & Board Games",
+    "location": "Central Perk Cafe",
+    "date": "2024-01-15",
+    "startTime": "2:00 PM",
+    "endTime": "5:00 PM",
+    "description": "Relax with some great coffee and friendly board game competition. Perfect for catching up while enjoying some lighthearted fun in a cozy atmosphere.",
+    "imageUrl": "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
+  }
+]
+
+Generate 5 diverse, practical suggestions. Return ONLY the JSON array, no other text.
+`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1500,
+      temperature: 0.7,
+    });
+
+    const suggestionsText = completion.choices[0]?.message?.content?.trim();
+    console.log('💡 Generated suggestions text:', suggestionsText);
+    
+    // Parse the JSON response
     try {
-      await db.collection('groups').doc(groupId).set({
-        id: groupId,
-        name: groupName,
-        participants: availableUserIds,
-        participantNames: availableUserNames,
-        createdAt: admin.firestore.Timestamp.now(),
-        eventDetails: finalEventCard,
-        lastMessage: null,
-        updatedAt: admin.firestore.Timestamp.now()
-      });
+      const eventCards = JSON.parse(suggestionsText);
+      if (Array.isArray(eventCards) && eventCards.length > 0) {
+        console.log('✅ Successfully parsed event cards:', eventCards.length);
+        return eventCards;
+      } else {
+        throw new Error('Invalid response format');
+      }
+    } catch (parseError) {
+      console.error('❌ Error parsing JSON response:', parseError);
+      // Return fallback event cards
+      return createFallbackEventCards(attendeeNames, suggestedDates);
+    }
+    
+  } catch (error) {
+    console.error('Error generating suggestions:', error);
+    // Return fallback event cards
+    return createFallbackEventCards(attendeeNames, generateSuggestedDates(planningStartDate, planningEndDate));
+  }
+}
+
+// Helper function to generate suggested dates within the planning range
+function generateSuggestedDates(planningStartDate, planningEndDate) {
+  const dates = [];
+  
+  if (!planningStartDate || !planningEndDate) {
+    // Default to next few days if no range specified
+    const today = new Date();
+    for (let i = 1; i <= 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      dates.push(date.toISOString().split('T')[0]);
+    }
+    return dates.slice(0, 5);
+  }
+  
+  const start = planningStartDate.toDate();
+  const end = planningEndDate.toDate();
+  const current = new Date(start);
+  
+  while (current <= end && dates.length < 7) {
+    dates.push(current.toISOString().split('T')[0]);
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return dates.length > 0 ? dates : [new Date().toISOString().split('T')[0]];
+}
+
+// Helper function to create fallback event cards when OpenAI fails
+function createFallbackEventCards(attendeeNames, suggestedDates) {
+  const fallbackEvents = [
+    {
+      type: "hangout_suggestion",
+      activity: "Coffee Meetup",
+      location: "Local Coffee Shop",
+      date: suggestedDates[0] || new Date().toISOString().split('T')[0],
+      startTime: "2:00 PM",
+      endTime: "4:00 PM",
+      description: "Let's catch up over coffee and pastries. A relaxed way to reconnect and share what's new in our lives.",
+      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
+    },
+    {
+      type: "hangout_suggestion",
+      activity: "Park Walk",
+      location: "Central Park",
+      date: suggestedDates[1] || new Date().toISOString().split('T')[0],
+      startTime: "11:00 AM",
+      endTime: "1:00 PM",
+      description: "Enjoy some fresh air and exercise with a scenic walk. Great opportunity for conversation while staying active.",
+      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
+    },
+    {
+      type: "hangout_suggestion",
+      activity: "Movie Night",
+      location: "Local Cinema",
+      date: suggestedDates[2] || new Date().toISOString().split('T')[0],
+      startTime: "7:00 PM",
+      endTime: "10:00 PM",
+      description: "Watch the latest blockbuster together followed by dinner discussion. Perfect for a fun evening out.",
+      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
+    }
+  ];
+  
+  console.log('🔄 Using fallback event cards');
+  return fallbackEvents;
+}
+
+// Send event card suggestions to available users
+async function sendSuggestionsToUsers(chatbotId, chatbotName, eventCards, availableUsers) {
+  for (const user of availableUsers) {
+    try {
+      // Find the chat for this user
+      const chatSnapshot = await db.collection('chats')
+        .where('chatbotId', '==', chatbotId)
+        .where('userId', '==', user.id)
+        .get();
       
-      console.log(`Created group ${groupId} for event: ${finalEventCard.activity}`);
+      if (chatSnapshot.empty) {
+        console.log(`❌ No chat found for user ${user.name}`);
+        continue;
+      }
       
-      // Send a welcome message to the group
-      const welcomeMessage = {
-        id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Welcome to the ${finalEventCard.activity} group! Use this chat to coordinate and discuss the event details.`,
-        senderId: 'system',
-        senderName: 'System',
-        timestamp: admin.firestore.Timestamp.now()
+      const chatId = chatSnapshot.docs[0].id;
+      
+      // Send introduction message first
+      const introMessage = {
+        id: db.collection('_').doc().id,
+        text: `🎉 **Hangout Suggestions!**\n\nHey ${user.name}! Based on everyone's preferences and availability, here are some great options for our get-together. Tap any card to see more details! 😊`,
+        senderId: 'chatbot',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        side: 'bot',
       };
       
-      await db.collection('groups').doc(groupId).collection('messages').add(welcomeMessage);
+      await db.collection('chats').doc(chatId).collection('messages').doc(introMessage.id).set(introMessage);
       
-      // Update the group's last message
-      await db.collection('groups').doc(groupId).update({
-        lastMessage: welcomeMessage.text,
-        updatedAt: admin.firestore.Timestamp.now()
-      });
+      // Send each event card as a separate message
+      for (const eventCard of eventCards) {
+        const eventMessage = {
+          id: db.collection('_').doc().id,
+          text: '', // Empty text since we're using event card
+          senderId: 'chatbot',
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          side: 'bot',
+          eventCard: {
+            type: eventCard.type,
+            activity: eventCard.activity,
+            location: eventCard.location,
+            date: eventCard.date,
+            startTime: eventCard.startTime,
+            endTime: eventCard.endTime,
+            description: eventCard.description,
+            imageUrl: eventCard.imageUrl
+            // No attendees field for suggestions
+          }
+        };
+        
+        await db.collection('chats').doc(chatId).collection('messages').doc(eventMessage.id).set(eventMessage);
+        console.log(`📋 Sent event card "${eventCard.activity}" to ${user.name}`);
+      }
+      
+      // Send closing message
+      const closingMessage = {
+        id: db.collection('_').doc().id,
+        text: `Which of these work for you? 🤔💭`,
+        senderId: 'chatbot',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        side: 'bot',
+      };
+      
+      await db.collection('chats').doc(chatId).collection('messages').doc(closingMessage.id).set(closingMessage);
+      
+      console.log(`✅ Sent ${eventCards.length} event card suggestions to ${user.name}`);
       
     } catch (error) {
-      console.error('Error creating group:', error);
-    }
-
-    // Only send to users who are available
-    for (const chatDoc of chatsSnapshot.docs) {
-      const userId = chatDoc.data().userId;
-      
-      // Skip users who indicated they are not available
-      if (unavailableUserIds.includes(userId)) {
-        console.log(`Skipping final plan for unavailable user ${userId}`);
-        continue;
-      }
-      
-      const userDoc = await db.collection('users').doc(userId).get();
-      const user = userDoc.data();
-
-      // Send an intro message
-      const introMessage = {
-        id: admin.firestore.Timestamp.now().toMillis().toString(),
-        text: `Hey ${user.fullname.split(' ')[0]}! Based on everyone's preferences, here's the plan we're going with. A group chat has been created for everyone attending to coordinate!`,
-        senderId: chatbot.id,
-        timestamp: admin.firestore.Timestamp.now(),
-        side: 'bot'
-      };
-      await db.collection('chats').doc(chatDoc.id).collection('messages').add(introMessage);
-      
-      // Send the event card
-      const cardMessage = {
-        id: admin.firestore.Timestamp.now().toMillis().toString(),
-        eventCard: finalEventCard,
-        senderId: chatbot.id,
-        timestamp: admin.firestore.Timestamp.now(),
-        side: 'bot'
-      };
-      await db.collection('chats').doc(chatDoc.id).collection('messages').add(cardMessage);
-      
-      // Update the chat's last message
-      await chatDoc.ref.update({
-        lastMessage: `Final plan: ${finalEventCard.activity}`,
-        updatedAt: admin.firestore.Timestamp.now()
-      });
+      console.error(`Error sending suggestions to ${user.name}:`, error);
     }
   }
 }
 
-exports.sendWeeklyMessages = functions
-  .region('us-central1')
-  .runWith({ platform: 'gcfv2' })
-  .pubsub
-  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
-  .timeZone('UTC')
-  .onRun(async () => sendMessagesToSubscribers());
+// Process final plan for a specific chatbot
+async function processFinalPlanForChatbot(chatbotId, chatbotData) {
+  try {
+    const chatbotName = chatbotData.name;
+    const subscribers = chatbotData.subscribers || [];
+    
+    console.log(`🎯 Analyzing chats for final plan selection: ${chatbotName}`);
+    
+    // Fetch all chat histories and event cards for this chatbot
+    const { allChatHistory, eventCards } = await fetchChatHistoryWithEventCards(chatbotId, subscribers);
+    
+    if (eventCards.length === 0) {
+      console.log('❌ No event cards found in chat history for final plan selection');
+      return;
+    }
+    
+    // Analyze chat history to find most popular event and attendees
+    console.log('🤖 Analyzing chat preferences and determining attendees...');
+    const finalPlanResult = await analyzeChatForFinalPlan(allChatHistory, eventCards, subscribers);
+    
+    if (!finalPlanResult.selectedEvent) {
+      console.log('❌ Could not determine a final plan from chat analysis');
+      return;
+    }
+    
+    // Create group chat with attendees
+    console.log(`👥 Creating group chat for ${finalPlanResult.attendees.length} attendees...`);
+    const groupChatId = await createGroupChat(finalPlanResult.selectedEvent, finalPlanResult.attendees, chatbotName);
+    
+    // Send final plan to all subscribers
+    console.log(`📤 Sending final plan to all ${subscribers.length} subscribers...`);
+    await sendFinalPlanToUsers(chatbotId, chatbotName, finalPlanResult.selectedEvent, finalPlanResult.attendees, subscribers, groupChatId);
+    
+    console.log(`✅ Successfully processed final plan for ${chatbotName}`);
+    
+  } catch (error) {
+    console.error(`Error processing final plan for chatbot ${chatbotId}:`, error);
+  }
+}
 
-exports.suggestWeekendOutings = functions
-  .region('us-central1')
-  .runWith({
-    platform: 'gcfv2',
-    timeoutSeconds: 540, // 9 minutes (maximum timeout)
-    memory: '1GB' // Increase memory allocation
-  })
-  .pubsub
-  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
-  .timeZone('UTC')
-  .onRun(async () => analyzeChatsAndSuggestOutings());
+// Fetch chat history and extract event cards
+async function fetchChatHistoryWithEventCards(chatbotId, subscribers) {
+  const allChats = {};
+  const eventCards = [];
+  
+  // Get all chats for this chatbot
+  const chatsSnapshot = await db.collection('chats').where('chatbotId', '==', chatbotId).get();
+  
+  for (const chatDoc of chatsSnapshot.docs) {
+    const chatData = chatDoc.data();
+    const userId = chatData.userId;
+    
+    // Fetch messages for this chat
+    const messagesSnapshot = await db.collection('chats').doc(chatDoc.id).collection('messages')
+      .orderBy('timestamp', 'asc').get();
+    
+    const messages = [];
+    messagesSnapshot.docs.forEach(messageDoc => {
+      const data = messageDoc.data();
+      
+      // Collect event cards from bot messages
+      if (data.eventCard && data.senderId === 'chatbot') {
+        // Check if this event card is already in our collection
+        const existingEvent = eventCards.find(event => 
+          event.activity === data.eventCard.activity && 
+          event.date === data.eventCard.date && 
+          event.startTime === data.eventCard.startTime
+        );
+        
+        if (!existingEvent) {
+          eventCards.push(data.eventCard);
+          console.log(`📋 Found event card: ${data.eventCard.activity} on ${data.eventCard.date}`);
+        }
+      }
+      
+      // Collect chat messages for analysis
+      if (data.timestamp && data.text && data.senderId) {
+        messages.push({
+          sender: data.senderId,
+          text: data.text,
+          timestamp: data.timestamp.toDate(),
+          side: data.side || 'unknown'
+        });
+      }
+    });
+    
+    if (messages.length > 0) {
+      allChats[userId] = messages;
+    }
+  }
+  
+  console.log(`📊 Found ${eventCards.length} unique event cards and chats from ${Object.keys(allChats).length} users`);
+  return { allChatHistory: allChats, eventCards };
+}
 
-exports.sendFinalPlan = functions
-  .region('us-central1')
-  .runWith({
-    platform: 'gcfv2',
-    timeoutSeconds: 540, // 9 minutes (maximum timeout)
-    memory: '1GB' // Increase memory allocation
-  })
-  .pubsub
-  .schedule('* * * * *') // Run every minute to check individual chatbot schedules
-  .timeZone('UTC')
-  .onRun(async () => analyzeResponsesAndSendFinalPlan());
+// Use OpenAI to analyze chat and determine final plan
+async function analyzeChatForFinalPlan(chatHistory, eventCards, subscribers) {
+  const eventDescriptions = eventCards.map((event, index) => 
+    `${index + 1}. ${event.activity} at ${event.location} on ${event.date} from ${event.startTime} to ${event.endTime}`
+  ).join('\n');
+  
+  const prompt = `
+Analyze the chat conversations to determine:
+1. Which event suggestion is most popular/preferred
+2. Which users have expressed interest in attending
 
-exports.sendMessagesToSubscribers = sendMessagesToSubscribers;
+Event Options:
+${eventDescriptions}
+
+All Subscribers: ${subscribers.join(', ')}
+
+Chat History:
+${JSON.stringify(chatHistory, null, 2)}
+
+Please analyze the conversations for:
+- Direct preferences ("I like option 2", "The coffee meetup sounds great")
+- Positive reactions ("That sounds fun!", "I'm interested", "Count me in")
+- Availability confirmations ("I can make it", "Works for me")
+- Negative responses ("I can't do that", "Not available", "Doesn't work for me")
+
+Return ONLY a JSON object with this exact format:
+{
+  "selectedEventIndex": number (0-based index of most popular event, or 0 if unclear),
+  "attendeeUserIds": ["array", "of", "user", "ids", "who", "expressed", "interest"],
+  "reasoning": "Brief explanation of why this event was selected"
+}
+
+Consider an event popular if multiple users show interest, or if it has the most positive responses.
+Include a user as an attendee if they showed any positive interest towards the selected event.
+`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 500,
+      temperature: 0.3,
+    });
+
+    const analysisText = completion.choices[0]?.message?.content?.trim();
+    console.log('🤖 Final plan analysis:', analysisText);
+    
+    try {
+      const analysis = JSON.parse(analysisText);
+      const selectedEvent = eventCards[analysis.selectedEventIndex] || eventCards[0];
+      
+      // Get user details for attendees
+      const attendees = await getUserDetailsByIds(analysis.attendeeUserIds || []);
+      
+      console.log(`✅ Selected event: ${selectedEvent.activity}`);
+      console.log(`👥 Attendees: ${attendees.map(u => u.name).join(', ')}`);
+      console.log(`💭 Reasoning: ${analysis.reasoning}`);
+      
+      return {
+        selectedEvent,
+        attendees,
+        reasoning: analysis.reasoning
+      };
+      
+    } catch (parseError) {
+      console.error('❌ Error parsing final plan analysis:', parseError);
+      // Fallback: select first event with all subscribers
+      const allUsers = await getUserDetailsByIds(subscribers);
+      return {
+        selectedEvent: eventCards[0],
+        attendees: allUsers,
+        reasoning: 'Analysis failed, selected first option with all users'
+      };
+    }
+    
+  } catch (error) {
+    console.error('Error analyzing final plan:', error);
+    // Fallback: select first event with all subscribers
+    const allUsers = await getUserDetailsByIds(subscribers);
+    return {
+      selectedEvent: eventCards[0],
+      attendees: allUsers,
+      reasoning: 'Analysis failed, selected first option with all users'
+    };
+  }
+}
+
+// Helper function to get user details by IDs or usernames
+async function getUserDetailsByIds(userIdentifiers) {
+  const users = [];
+  
+  for (const identifier of userIdentifiers) {
+    try {
+      // First try fetching by document ID
+      let userDoc = await db.collection('users').doc(identifier).get();
+      let userData = userDoc.data();
+      
+      // If not found by ID, try querying by username
+      if (!userData) {
+        const usernameQuery = await db.collection('users').where('username', '==', identifier).get();
+        if (!usernameQuery.empty) {
+          userDoc = usernameQuery.docs[0];
+          userData = userDoc.data();
+        }
+      }
+      
+      if (userData && userData.fullname && userData.username) {
+        users.push({
+          id: userDoc.id,
+          name: userData.fullname,
+          username: userData.username,
+          homeCity: userData.homeCity || 'Unknown'
+        });
+      }
+    } catch (error) {
+      console.error(`Error fetching user ${identifier}:`, error);
+    }
+  }
+  
+  return users;
+}
+
+// Create a group chat for the final plan
+async function createGroupChat(selectedEvent, attendees, chatbotName) {
+  try {
+    const groupId = db.collection('_').doc().id;
+    const attendeeIds = attendees.map(user => user.id);
+    const attendeeNames = attendees.map(user => user.name);
+    
+    const groupData = {
+      id: groupId,
+      name: `${selectedEvent.activity} - ${chatbotName}`,
+      participants: attendeeIds,
+      participantNames: attendeeNames,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      eventDetails: selectedEvent,
+      lastMessage: 'Group created for your hangout!',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    await db.collection('groups').doc(groupId).set(groupData);
+    
+    // Send welcome message to the group
+    const welcomeMessage = {
+      id: db.collection('_').doc().id,
+      text: `🎉 Welcome to your hangout group!\n\nYour final plan: ${selectedEvent.activity} at ${selectedEvent.location} on ${selectedEvent.date} from ${selectedEvent.startTime} to ${selectedEvent.endTime}.\n\nLooking forward to seeing everyone there! 😊`,
+      senderId: 'system',
+      senderName: 'System',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      side: 'bot'
+    };
+    
+    await db.collection('groups').doc(groupId).collection('messages').doc(welcomeMessage.id).set(welcomeMessage);
+    
+    console.log(`✅ Created group chat: ${groupData.name} with ${attendees.length} participants`);
+    return groupId;
+    
+  } catch (error) {
+    console.error('Error creating group chat:', error);
+    return null;
+  }
+}
+
+// Send final plan to all users
+async function sendFinalPlanToUsers(chatbotId, chatbotName, selectedEvent, attendees, allSubscribers, groupChatId) {
+  const attendeeNames = attendees.map(user => user.name);
+  
+  // Update the selected event with final attendee list
+  const finalEventCard = {
+    ...selectedEvent,
+    attendees: attendeeNames
+  };
+  
+  for (const subscriberId of allSubscribers) {
+    try {
+      // Find the chat for this user
+      const chatSnapshot = await db.collection('chats')
+        .where('chatbotId', '==', chatbotId)
+        .where('userId', '==', subscriberId)
+        .get();
+      
+      if (chatSnapshot.empty) {
+        // Try by username
+        const userQuery = await db.collection('users').where('username', '==', subscriberId).get();
+        if (!userQuery.empty) {
+          const userId = userQuery.docs[0].id;
+          const userChatSnapshot = await db.collection('chats')
+            .where('chatbotId', '==', chatbotId)
+            .where('userId', '==', userId)
+            .get();
+          
+          if (!userChatSnapshot.empty) {
+            await sendFinalPlanToChat(userChatSnapshot.docs[0].id, selectedEvent, finalEventCard, attendeeNames, groupChatId);
+          }
+        }
+        continue;
+      }
+      
+      const chatId = chatSnapshot.docs[0].id;
+      await sendFinalPlanToChat(chatId, selectedEvent, finalEventCard, attendeeNames, groupChatId);
+      
+    } catch (error) {
+      console.error(`Error sending final plan to subscriber ${subscriberId}:`, error);
+    }
+  }
+}
+
+// Send final plan messages to a specific chat
+async function sendFinalPlanToChat(chatId, selectedEvent, finalEventCard, attendeeNames, groupChatId) {
+  try {
+    // Send announcement message
+    const announcementMessage = {
+      id: db.collection('_').doc().id,
+      text: `🎉 **Final Plan Confirmed!**\n\nWe've analyzed everyone's preferences and here's our final plan! ${groupChatId ? 'A group chat has been created for everyone attending.' : ''}`,
+      senderId: 'chatbot',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      side: 'bot',
+    };
+    
+    await db.collection('chats').doc(chatId).collection('messages').doc(announcementMessage.id).set(announcementMessage);
+    
+    // Send the final event card
+    const eventMessage = {
+      id: db.collection('_').doc().id,
+      text: '',
+      senderId: 'chatbot',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      side: 'bot',
+      eventCard: finalEventCard
+    };
+    
+    await db.collection('chats').doc(chatId).collection('messages').doc(eventMessage.id).set(eventMessage);
+    
+    // Send attendee summary
+    const attendeeSummary = {
+      id: db.collection('_').doc().id,
+      text: `👥 **Who's Coming:** ${attendeeNames.join(', ')}\n\n${groupChatId ? `Join the group chat to coordinate details and stay connected with everyone! 💬` : 'Looking forward to seeing everyone there! 😊'}`,
+      senderId: 'chatbot',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      side: 'bot',
+    };
+    
+    await db.collection('chats').doc(chatId).collection('messages').doc(attendeeSummary.id).set(attendeeSummary);
+    
+    console.log(`✅ Sent final plan to chat ${chatId}`);
+    
+  } catch (error) {
+    console.error(`Error sending final plan to chat ${chatId}:`, error);
+  }
+}
+
+// Helper function to format date range for prompts
+function formatDateRangeForPrompt(startDate, endDate) {
+  if (!startDate || !endDate) {
+    return 'the upcoming period';
+  }
+  
+  const start = startDate.toDate();
+  const end = endDate.toDate();
+  
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  
+  const calendar = new Date();
+  if (start.toDateString() === end.toDateString()) {
+    return formatter.format(start);
+  } else {
+    return `${formatter.format(start)} through ${formatter.format(end)}`;
+  }
+}
+
+// Firestore trigger: on new user message, generate bot reply
+exports.onMessageCreate = functions.firestore
+  .document('chats/{chatId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const chatId = context.params.chatId;
+
+    // Only respond to user messages
+    if (!message || message.side !== 'user') return null;
+
+    try {
+      // Fetch last 10 messages for context, ordered by timestamp
+      const messagesSnap = await db
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', 'desc')
+        .limit(10)
+        .get();
+
+      // Reverse to chronological order
+      const chatHistory = [];
+      messagesSnap.docs.reverse().forEach(doc => {
+        const m = doc.data();
+        if (m && m.text && m.side) {
+          chatHistory.push({
+            role: m.side === 'user' ? 'user' : 'assistant',
+            content: m.text,
+          });
+        }
+      });
+
+      // Add the latest user message if not already present
+      if (
+        chatHistory.length === 0 ||
+        chatHistory[chatHistory.length - 1].content !== message.text
+      ) {
+        chatHistory.push({ role: 'user', content: message.text });
+      }
+
+      // Construct the prompt (generalizable for future expansion)
+      const prompt = [
+        { role: 'system', content: await generateSystemPrompt(chatId) },
+        ...chatHistory
+      ];
+
+      // Log the exact prompt sent to OpenAI
+      console.log('OpenAI prompt:', JSON.stringify(prompt, null, 2));
+
+      // Call OpenAI
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: prompt,
+        max_tokens: 256,
+        temperature: 0.7,
+      });
+      const reply = completion.choices[0]?.message?.content?.trim();
+      if (!reply) return null;
+
+      // Write bot response as a new message
+      const botMessage = {
+        id: admin.firestore().collection('_').doc().id,
+        text: reply,
+        senderId: 'chatbot',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        side: 'bot',
+      };
+      await db.collection('chats').doc(chatId).collection('messages').doc(botMessage.id).set(botMessage);
+      return true;
+    } catch (err) {
+      console.error('Error generating bot reply:', err);
+      return null;
+    }
+  });
