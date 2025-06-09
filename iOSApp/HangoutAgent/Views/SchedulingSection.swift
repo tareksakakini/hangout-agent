@@ -57,9 +57,9 @@ struct SchedulingSection: View {
                     hour: $suggestionsHour,
                     minute: $suggestionsMinute,
                     minDate: Date(),
-                    maxDate: finalPlanDate,
-                    maxHour: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? finalPlanHour : nil,
-                    maxMinute: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? finalPlanMinute : nil
+                    maxDate: Calendar.current.date(byAdding: .day, value: -1, to: planningStartDate) ?? planningStartDate,
+                    maxHour: nil,
+                    maxMinute: nil
                 )
                 
                 SchedulingPickerRow(
@@ -90,26 +90,48 @@ struct SchedulingSection: View {
             // If suggestionsDate == finalPlanDate and suggestions time is after final plan, auto-correct
             if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
                 if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
-                    suggestionsHour = finalPlanHour
-                    suggestionsMinute = finalPlanMinute
+                    setFinalPlanTimeToTwoHoursAfterSuggestions()
                 }
+            }
+            // If finalPlanDate is before suggestionsDate, auto-correct to suggestionsDate and set time 2 hours after suggestions
+            if finalPlanDate < suggestionsDate {
+                finalPlanDate = suggestionsDate
+                setFinalPlanTimeToTwoHoursAfterSuggestions()
             }
         }
         .onChange(of: finalPlanHour) { _, _ in
             if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
-                if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
-                    suggestionsHour = finalPlanHour
-                    suggestionsMinute = finalPlanMinute
+                if finalPlanHour < suggestionsHour || (finalPlanHour == suggestionsHour && finalPlanMinute <= suggestionsMinute) {
+                    setFinalPlanTimeToTwoHoursAfterSuggestions()
                 }
+            }
+            if finalPlanDate < suggestionsDate {
+                finalPlanDate = suggestionsDate
+                setFinalPlanTimeToTwoHoursAfterSuggestions()
             }
         }
         .onChange(of: finalPlanMinute) { _, _ in
             if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
-                if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
-                    suggestionsHour = finalPlanHour
-                    suggestionsMinute = finalPlanMinute
+                if finalPlanHour < suggestionsHour || (finalPlanHour == suggestionsHour && finalPlanMinute <= suggestionsMinute) {
+                    setFinalPlanTimeToTwoHoursAfterSuggestions()
                 }
             }
+            if finalPlanDate < suggestionsDate {
+                finalPlanDate = suggestionsDate
+                setFinalPlanTimeToTwoHoursAfterSuggestions()
+            }
+        }
+    }
+
+    private func setFinalPlanTimeToTwoHoursAfterSuggestions() {
+        var newHour = suggestionsHour + 2
+        var newMinute = suggestionsMinute
+        if newHour > 23 || (newHour == 23 && newMinute > 55) {
+            finalPlanHour = 23
+            finalPlanMinute = 55
+        } else {
+            finalPlanHour = newHour
+            finalPlanMinute = newMinute
         }
     }
 }

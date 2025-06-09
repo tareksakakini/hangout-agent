@@ -16,7 +16,11 @@ struct CreateChatbotView: View {
     @State var name: String = ""
     @State var searchText: String = ""
     @State var selectedUsers: Set<String> = []
-    @State var errorMessage: String?
+    
+    // Alert state
+    @State private var showAlert: Bool = false
+    @State private var alertTitle: String = ""
+    @State private var alertMessage: String = ""
     
     // Scheduling state variables - now using dates instead of days
     private static func defaultDates() -> (suggestionsDate: Date, suggestionsHour: Int, suggestionsMinute: Int, finalPlanDate: Date, finalPlanHour: Int, finalPlanMinute: Int, planningStartDate: Date, planningEndDate: Date) {
@@ -63,6 +67,35 @@ struct CreateChatbotView: View {
                 return matchesSearch && isNotCurrentUser
             }
         }
+    }
+    
+    private var planningStartDateBinding: Binding<Date> {
+        Binding<Date>(
+            get: { self.planningStartDate },
+            set: { newStartDate in
+                // Before updating planningStartDate, check and correct other dates.
+                let calendar = Calendar.current
+                let dayBeforePlanningStart = calendar.date(byAdding: .day, value: -1, to: newStartDate) ?? newStartDate
+
+                // If finalPlanDate is now invalid, move it to the latest possible date.
+                if self.finalPlanDate >= newStartDate {
+                    self.finalPlanDate = dayBeforePlanningStart
+                }
+
+                // If suggestionsDate is now invalid relative to finalPlanDate, move it.
+                if self.suggestionsDate > self.finalPlanDate {
+                    self.suggestionsDate = self.finalPlanDate
+                }
+                
+                // Now, it's safe to update planningStartDate.
+                self.planningStartDate = newStartDate
+
+                // Finally, ensure planningEndDate is valid.
+                if self.planningEndDate < self.planningStartDate {
+                    self.planningEndDate = self.planningStartDate
+                }
+            }
+        )
     }
     
     var body: some View {
@@ -118,7 +151,7 @@ struct CreateChatbotView: View {
                             
                             // Date range section
                             DateRangeSection(
-                                planningStartDate: $planningStartDate,
+                                planningStartDate: planningStartDateBinding,
                                 planningEndDate: $planningEndDate
                             )
                             
@@ -133,9 +166,6 @@ struct CreateChatbotView: View {
                                 timeZone: timeZone,
                                 planningStartDate: planningStartDate
                             )
-                            
-                            // Error message
-                            ErrorMessageSection(errorMessage: errorMessage)
                         }
                         .padding(24)
                         .background(Color.white)
@@ -171,9 +201,41 @@ struct CreateChatbotView: View {
                     .environmentObject(vm)
             }
         }
+        .alert(isPresented: $showAlert) {
+            Alert(
+                title: Text(alertTitle),
+                message: Text(alertMessage),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
     
     func createChatbot() {
+        // --- Validation Step ---
+        let calendar = Calendar.current
+        var suggestionsComponents = calendar.dateComponents([.year, .month, .day], from: suggestionsDate)
+        suggestionsComponents.hour = suggestionsHour
+        suggestionsComponents.minute = suggestionsMinute
+        
+        var finalPlanComponents = calendar.dateComponents([.year, .month, .day], from: finalPlanDate)
+        finalPlanComponents.hour = finalPlanHour
+        finalPlanComponents.minute = finalPlanMinute
+        
+        guard let fullSuggestionsDate = calendar.date(from: suggestionsComponents),
+              let fullFinalPlanDate = calendar.date(from: finalPlanComponents) else {
+            alertTitle = "Error"
+            alertMessage = "Could not verify schedule dates. Please try again."
+            showAlert = true
+            return
+        }
+
+        if fullFinalPlanDate <= fullSuggestionsDate {
+            alertTitle = "Invalid Schedule"
+            alertMessage = "The 'Send Final Plan' time must be after the 'Send Suggestions' time. Please adjust the schedule."
+            showAlert = true
+            return
+        }
+        
         Task {
             let chatbotID = UUID().uuidString
             if let user = vm.signedInUser {
