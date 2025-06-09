@@ -102,7 +102,6 @@ struct EventCardView: View {
                     showEventDetail = true
                 }) {
                     HStack {
-                        Image(systemName: "ellipsis")
                         Text("See Details")
                     }
                     .frame(maxWidth: .infinity)

@@ -36,7 +36,7 @@ struct DateRangeSection: View {
                             .foregroundColor(.primary)
                     }
                     
-                    DatePicker("Start Date", selection: $planningStartDate, displayedComponents: .date)
+                    DatePicker("Start Date", selection: $planningStartDate, in: Date()..., displayedComponents: .date)
                         .datePickerStyle(CompactDatePickerStyle())
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)

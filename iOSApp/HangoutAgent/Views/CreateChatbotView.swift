@@ -19,19 +19,35 @@ struct CreateChatbotView: View {
     @State var errorMessage: String?
     
     // Scheduling state variables - now using dates instead of days
-    @State var suggestionsDate: Date = Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
-    @State var suggestionsHour: Int = 14 // Default to 2 PM
-    @State var suggestionsMinute: Int = 0
-    
-    @State var finalPlanDate: Date = Calendar.current.date(byAdding: .day, value: 5, to: Date()) ?? Date()
-    @State var finalPlanHour: Int = 16 // Default to 4 PM
-    @State var finalPlanMinute: Int = 0
-    
+    private static func defaultDates() -> (suggestionsDate: Date, suggestionsHour: Int, suggestionsMinute: Int, finalPlanDate: Date, finalPlanHour: Int, finalPlanMinute: Int, planningStartDate: Date, planningEndDate: Date) {
+        let calendar = Calendar.current
+        let now = Date()
+        // Suggestions: 2 days from today at 9am
+        let suggestionsDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: calendar.date(byAdding: .day, value: 2, to: now) ?? now) ?? now
+        // Final plan: 1 day after suggestions at 9am
+        let finalPlanDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: calendar.date(byAdding: .day, value: 1, to: suggestionsDate) ?? suggestionsDate) ?? suggestionsDate
+        // Start date: first Friday after final plan
+        var startDate = finalPlanDate
+        while calendar.component(.weekday, from: startDate) != 6 { // 6 = Friday
+            startDate = calendar.date(byAdding: .day, value: 1, to: startDate) ?? startDate
+        }
+        // End date: the Sunday after start date
+        var endDate = startDate
+        while calendar.component(.weekday, from: endDate) != 1 { // 1 = Sunday
+            endDate = calendar.date(byAdding: .day, value: 1, to: endDate) ?? endDate
+        }
+        return (suggestionsDate, 9, 0, finalPlanDate, 9, 0, startDate, endDate)
+    }
+
+    @State var suggestionsDate: Date = defaultDates().suggestionsDate
+    @State var suggestionsHour: Int = defaultDates().suggestionsHour
+    @State var suggestionsMinute: Int = defaultDates().suggestionsMinute
+    @State var finalPlanDate: Date = defaultDates().finalPlanDate
+    @State var finalPlanHour: Int = defaultDates().finalPlanHour
+    @State var finalPlanMinute: Int = defaultDates().finalPlanMinute
+    @State var planningStartDate: Date = defaultDates().planningStartDate
+    @State var planningEndDate: Date = defaultDates().planningEndDate
     @State var timeZone: String = "America/Los_Angeles"
-    
-    // Date range for planning
-    @State var planningStartDate: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-    @State var planningEndDate: Date = Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date()
     
     @State private var profileUser: User? = nil
     
@@ -114,7 +130,8 @@ struct CreateChatbotView: View {
                                 finalPlanDate: $finalPlanDate,
                                 finalPlanHour: $finalPlanHour,
                                 finalPlanMinute: $finalPlanMinute,
-                                timeZone: timeZone
+                                timeZone: timeZone,
+                                planningStartDate: planningStartDate
                             )
                             
                             // Error message

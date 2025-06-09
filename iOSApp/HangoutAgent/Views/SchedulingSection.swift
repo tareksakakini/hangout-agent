@@ -8,6 +8,7 @@ struct SchedulingSection: View {
     @Binding var finalPlanHour: Int
     @Binding var finalPlanMinute: Int
     var timeZone: String
+    var planningStartDate: Date
     
     init(
         suggestionsDate: Binding<Date>,
@@ -16,7 +17,8 @@ struct SchedulingSection: View {
         finalPlanDate: Binding<Date>,
         finalPlanHour: Binding<Int>,
         finalPlanMinute: Binding<Int>,
-        timeZone: String
+        timeZone: String,
+        planningStartDate: Date
     ) {
         self._suggestionsDate = suggestionsDate
         self._suggestionsHour = suggestionsHour
@@ -25,6 +27,7 @@ struct SchedulingSection: View {
         self._finalPlanHour = finalPlanHour
         self._finalPlanMinute = finalPlanMinute
         self.timeZone = timeZone
+        self.planningStartDate = planningStartDate
     }
     
     var body: some View {
@@ -52,7 +55,9 @@ struct SchedulingSection: View {
                     iconColor: .orange,
                     date: $suggestionsDate,
                     hour: $suggestionsHour,
-                    minute: $suggestionsMinute
+                    minute: $suggestionsMinute,
+                    minDate: Date(),
+                    maxDate: finalPlanDate
                 )
                 
                 SchedulingPickerRow(
@@ -61,7 +66,9 @@ struct SchedulingSection: View {
                     iconColor: .blue,
                     date: $finalPlanDate,
                     hour: $finalPlanHour,
-                    minute: $finalPlanMinute
+                    minute: $finalPlanMinute,
+                    minDate: suggestionsDate,
+                    maxDate: Calendar.current.date(byAdding: .day, value: -1, to: planningStartDate) ?? planningStartDate
                 )
             }
         }
@@ -85,14 +92,18 @@ struct SchedulingPickerRow: View {
     @Binding var date: Date
     @Binding var hour: Int
     @Binding var minute: Int
+    var minDate: Date
+    var maxDate: Date
     
-    init(title: String, icon: String, iconColor: Color, date: Binding<Date>, hour: Binding<Int>, minute: Binding<Int>) {
+    init(title: String, icon: String, iconColor: Color, date: Binding<Date>, hour: Binding<Int>, minute: Binding<Int>, minDate: Date, maxDate: Date) {
         self.title = title
         self.icon = icon
         self.iconColor = iconColor
         self._date = date
         self._hour = hour
         self._minute = minute
+        self.minDate = minDate
+        self.maxDate = maxDate
     }
     
     var body: some View {
@@ -117,7 +128,7 @@ struct SchedulingPickerRow: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
                     
-                    DatePicker("", selection: $date, displayedComponents: .date)
+                    DatePicker("", selection: $date, in: minDate...maxDate, displayedComponents: .date)
                         .datePickerStyle(CompactDatePickerStyle())
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
