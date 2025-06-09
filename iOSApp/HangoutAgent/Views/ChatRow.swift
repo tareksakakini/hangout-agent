@@ -14,13 +14,13 @@ struct ChatRow: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            // Placeholder circle avatar
+            // Robot avatar
             Circle()
                 .fill(Color.blue.opacity(0.2))
                 .frame(width: 50, height: 50)
                 .overlay(
-                    Text(chatbot.name.prefix(1))
-                        .font(.title2.bold())
+                    Image(systemName: "bubbles.and.sparkles.fill")
+                        .font(.system(size: 28, weight: .medium))
                         .foregroundColor(.blue)
                 )
             
