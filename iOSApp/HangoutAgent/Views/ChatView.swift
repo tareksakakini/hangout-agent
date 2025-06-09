@@ -66,6 +66,9 @@ struct ChatView: View {
                         if chat == nil {
                             _ = await vm.fetchOrCreateChat(userId: user.id, chatbotId: chatbot.id)
                         }
+                        if let chat = chat {
+                            vm.startListeningToMessages(chatId: chat.id)
+                        }
                     }
                 }
             }
