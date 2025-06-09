@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { OpenAI } = require('openai');
+const axios = require('axios');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -8,6 +9,10 @@ const db = admin.firestore();
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || functions.config().openai?.key,
 });
+
+const unsplash = {
+  accessKey: functions.config().unsplash?.key,
+};
 
 // Function to generate the system prompt
 async function generateSystemPrompt(chatId) {
@@ -639,25 +644,30 @@ Generate 5 diverse, practical suggestions. Return ONLY the JSON array, no other 
     const suggestionsText = completion.choices[0]?.message?.content?.trim();
     console.log('💡 Generated suggestions text:', suggestionsText);
     
-    // Parse the JSON response
     try {
-      const eventCards = JSON.parse(suggestionsText);
+      let eventCards = JSON.parse(suggestionsText);
       if (Array.isArray(eventCards) && eventCards.length > 0) {
         console.log('✅ Successfully parsed event cards:', eventCards.length);
+        
+        // Fetch images for each event card
+        eventCards = await Promise.all(eventCards.map(async (card) => {
+          const searchQuery = `${card.activity}`;
+          card.imageUrl = await fetchUnsplashImage(searchQuery);
+          return card;
+        }));
+        
         return eventCards;
       } else {
         throw new Error('Invalid response format');
       }
     } catch (parseError) {
       console.error('❌ Error parsing JSON response:', parseError);
-      // Return fallback event cards
-      return createFallbackEventCards(attendeeNames, suggestedDates);
+      return await createFallbackEventCards(attendeeNames, suggestedDates);
     }
     
   } catch (error) {
     console.error('Error generating suggestions:', error);
-    // Return fallback event cards
-    return createFallbackEventCards(attendeeNames, generateSuggestedDates(planningStartDate, planningEndDate));
+    return await createFallbackEventCards(attendeeNames, generateSuggestedDates(planningStartDate, planningEndDate));
   }
 }
 
@@ -689,7 +699,7 @@ function generateSuggestedDates(planningStartDate, planningEndDate) {
 }
 
 // Helper function to create fallback event cards when OpenAI fails
-function createFallbackEventCards(attendeeNames, suggestedDates) {
+async function createFallbackEventCards(attendeeNames, suggestedDates) {
   const fallbackEvents = [
     {
       type: "hangout_suggestion",
@@ -699,7 +709,6 @@ function createFallbackEventCards(attendeeNames, suggestedDates) {
       startTime: "2:00 PM",
       endTime: "4:00 PM",
       description: "Let's catch up over coffee and pastries. A relaxed way to reconnect and share what's new in our lives.",
-      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
     },
     {
       type: "hangout_suggestion",
@@ -709,7 +718,6 @@ function createFallbackEventCards(attendeeNames, suggestedDates) {
       startTime: "11:00 AM",
       endTime: "1:00 PM",
       description: "Enjoy some fresh air and exercise with a scenic walk. Great opportunity for conversation while staying active.",
-      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
     },
     {
       type: "hangout_suggestion",
@@ -719,12 +727,18 @@ function createFallbackEventCards(attendeeNames, suggestedDates) {
       startTime: "7:00 PM",
       endTime: "10:00 PM",
       description: "Watch the latest blockbuster together followed by dinner discussion. Perfect for a fun evening out.",
-      imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop"
     }
   ];
+
+  // Fetch images for fallback events
+  const eventsWithImages = await Promise.all(fallbackEvents.map(async (card) => {
+    const searchQuery = `${card.activity} ${card.location}`;
+    card.imageUrl = await fetchUnsplashImage(searchQuery);
+    return card;
+  }));
   
-  console.log('🔄 Using fallback event cards');
-  return fallbackEvents;
+  console.log('🔄 Using fallback event cards with fetched images');
+  return eventsWithImages;
 }
 
 // Send event card suggestions to available users
@@ -1243,3 +1257,36 @@ exports.onMessageCreate = functions.firestore
       return null;
     }
   });
+
+// Function to fetch an image from Unsplash
+async function fetchUnsplashImage(query) {
+  if (!unsplash.accessKey) {
+    console.warn('Unsplash API key not configured. Skipping image fetch.');
+    return 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop';
+  }
+
+  const url = 'https://api.unsplash.com/search/photos';
+  const params = {
+    query: query,
+    per_page: 1,
+    orientation: 'landscape',
+  };
+  const headers = {
+    Authorization: `Client-ID ${unsplash.accessKey}`,
+  };
+
+  try {
+    const response = await axios.get(url, { params, headers });
+    const imageUrl = response.data.results[0]?.urls?.regular;
+    if (imageUrl) {
+      console.log(`📸 Found image for query "${query}": ${imageUrl}`);
+      return imageUrl;
+    } else {
+      console.warn(`No image found for query: ${query}. Using fallback.`);
+      return 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop'; // Fallback
+    }
+  } catch (error) {
+    console.error(`Error fetching image from Unsplash for query "${query}":`, error.response?.data || error.message);
+    return 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop'; // Fallback
+  }
+}
