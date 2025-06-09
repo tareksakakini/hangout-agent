@@ -121,7 +121,9 @@ struct SchedulingPickerRow: View {
                         .datePickerStyle(CompactDatePickerStyle())
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
+                        .clipped()
                 }
+                .background(Color(.systemBackground))
                 
                 // Time picker
                 VStack(alignment: .leading, spacing: 4) {

@@ -40,6 +40,7 @@ struct DateRangeSection: View {
                         .datePickerStyle(CompactDatePickerStyle())
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipped()
                 }
                 
                 // End date  
@@ -59,8 +60,10 @@ struct DateRangeSection: View {
                         .datePickerStyle(CompactDatePickerStyle())
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipped()
                 }
             }
+            .background(Color(.systemBackground))
         }
         .padding(20)
         .background(
