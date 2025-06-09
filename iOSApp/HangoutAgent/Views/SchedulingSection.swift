@@ -57,7 +57,9 @@ struct SchedulingSection: View {
                     hour: $suggestionsHour,
                     minute: $suggestionsMinute,
                     minDate: Date(),
-                    maxDate: finalPlanDate
+                    maxDate: finalPlanDate,
+                    maxHour: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? finalPlanHour : nil,
+                    maxMinute: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? finalPlanMinute : nil
                 )
                 
                 SchedulingPickerRow(
@@ -68,7 +70,9 @@ struct SchedulingSection: View {
                     hour: $finalPlanHour,
                     minute: $finalPlanMinute,
                     minDate: suggestionsDate,
-                    maxDate: Calendar.current.date(byAdding: .day, value: -1, to: planningStartDate) ?? planningStartDate
+                    maxDate: Calendar.current.date(byAdding: .day, value: -1, to: planningStartDate) ?? planningStartDate,
+                    minHour: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? suggestionsHour : nil,
+                    minMinute: Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) ? suggestionsMinute : nil
                 )
             }
         }
@@ -82,6 +86,31 @@ struct SchedulingSection: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(.systemGray5), lineWidth: 1)
         )
+        .onChange(of: finalPlanDate) { _, _ in
+            // If suggestionsDate == finalPlanDate and suggestions time is after final plan, auto-correct
+            if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
+                if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
+                    suggestionsHour = finalPlanHour
+                    suggestionsMinute = finalPlanMinute
+                }
+            }
+        }
+        .onChange(of: finalPlanHour) { _, _ in
+            if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
+                if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
+                    suggestionsHour = finalPlanHour
+                    suggestionsMinute = finalPlanMinute
+                }
+            }
+        }
+        .onChange(of: finalPlanMinute) { _, _ in
+            if Calendar.current.isDate(suggestionsDate, inSameDayAs: finalPlanDate) {
+                if suggestionsHour > finalPlanHour || (suggestionsHour == finalPlanHour && suggestionsMinute > finalPlanMinute) {
+                    suggestionsHour = finalPlanHour
+                    suggestionsMinute = finalPlanMinute
+                }
+            }
+        }
     }
 }
 
@@ -94,8 +123,12 @@ struct SchedulingPickerRow: View {
     @Binding var minute: Int
     var minDate: Date
     var maxDate: Date
+    var minHour: Int?
+    var minMinute: Int?
+    var maxHour: Int?
+    var maxMinute: Int?
     
-    init(title: String, icon: String, iconColor: Color, date: Binding<Date>, hour: Binding<Int>, minute: Binding<Int>, minDate: Date, maxDate: Date) {
+    init(title: String, icon: String, iconColor: Color, date: Binding<Date>, hour: Binding<Int>, minute: Binding<Int>, minDate: Date, maxDate: Date, minHour: Int? = nil, minMinute: Int? = nil, maxHour: Int? = nil, maxMinute: Int? = nil) {
         self.title = title
         self.icon = icon
         self.iconColor = iconColor
@@ -104,6 +137,10 @@ struct SchedulingPickerRow: View {
         self._minute = minute
         self.minDate = minDate
         self.maxDate = maxDate
+        self.minHour = minHour
+        self.minMinute = minMinute
+        self.maxHour = maxHour
+        self.maxMinute = maxMinute
     }
     
     var body: some View {
@@ -146,8 +183,18 @@ struct SchedulingPickerRow: View {
                         // Hour picker
                         Menu {
                             ForEach(0..<24, id: \.self) { h in
-                                Button(String(format: "%02d", h)) {
-                                    hour = h
+                                if (minHour == nil || h > minHour! || (h == minHour! && (minMinute == nil || minute > minMinute!))) && (maxHour == nil || h < maxHour! || (h == maxHour! && (maxMinute == nil || minute <= maxMinute!))) {
+                                    Button(String(format: "%02d", h)) {
+                                        hour = h
+                                        // If hour is set to minHour, reset minute to minMinute or 0
+                                        if let minHour = minHour, h == minHour, let minMinute = minMinute, minute < minMinute {
+                                            minute = minMinute
+                                        }
+                                        // If hour is set to maxHour, reset minute to maxMinute if needed
+                                        if let maxHour = maxHour, h == maxHour, let maxMinute = maxMinute, minute > maxMinute {
+                                            minute = maxMinute
+                                        }
+                                    }
                                 }
                             }
                         } label: {
@@ -172,8 +219,10 @@ struct SchedulingPickerRow: View {
                         // Minute picker
                         Menu {
                             ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { m in
-                                Button(String(format: "%02d", m)) {
-                                    minute = m
+                                if (minHour == nil || hour > minHour! || (hour == minHour! && m > (minMinute ?? -1))) && (maxHour == nil || hour < maxHour! || (hour == maxHour! && m <= (maxMinute ?? 60))) {
+                                    Button(String(format: "%02d", m)) {
+                                        minute = m
+                                    }
                                 }
                             }
                         } label: {
