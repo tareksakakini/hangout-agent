@@ -76,6 +76,7 @@ struct GroupListView: View {
 
 private struct GroupRow: View {
     let group: HangoutGroup
+    let lastMessage: GroupMessage?
     
     var body: some View {
         HStack(spacing: 16) {
@@ -95,8 +96,13 @@ private struct GroupRow: View {
                     .foregroundColor(.primary)
                     .lineLimit(1)
                 
-                if let lastMessage = group.lastMessage {
-                    Text(lastMessage)
+                if let lastMessage = lastMessage {
+                    Text("\(lastMessage.senderName): \(lastMessage.text)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
+                } else if let lastMessageText = group.lastMessage {
+                    Text(lastMessageText)
                         .font(.subheadline)
                         .foregroundColor(.gray)
                         .lineLimit(2)
@@ -147,11 +153,12 @@ private struct GroupRowWithNavigation: View {
     @State private var selectedGroup: HangoutGroup?
     
     var body: some View {
+        let lastMessage = vm.groupMessages[group.id]?.last
         HStack {
             Button(action: {
                 selectedGroup = group
             }) {
-                GroupRow(group: group)
+                GroupRow(group: group, lastMessage: lastMessage)
             }
             .buttonStyle(PlainButtonStyle()) // removes weird tap animation
         }
