@@ -29,6 +29,10 @@ struct GroupChatView: View {
                         }
                     }
                 }
+                .onAppear {
+                    // Ensure we start at the bottom when the chat first opens
+                    scrollToBottom(using: scrollViewProxy)
+                }
                 .onChange(of: groupMessages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
                     vm.markGroupMessagesAsRead(groupId: group.id)
@@ -93,9 +97,7 @@ struct GroupChatView: View {
     
     private func scrollToBottom(using proxy: ScrollViewProxy) {
         if let lastMessage = groupMessages.last {
-            withAnimation {
-                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-            }
+            proxy.scrollTo(lastMessage.id, anchor: .bottom)
         }
     }
     

@@ -58,6 +58,10 @@ struct ChatView: View {
                         }
                     }
                 }
+                .onAppear {
+                    // Auto-scroll to bottom when opening chat
+                    scrollToBottom(using: scrollViewProxy)
+                }
                 .onChange(of: chat?.messages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
                     if let chat {
@@ -153,9 +157,7 @@ struct ChatView: View {
     
     private func scrollToBottom(using proxy: ScrollViewProxy) {
         if let lastMessage = chat?.messages.last {
-            withAnimation {
-                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-            }
+            proxy.scrollTo(lastMessage.id, anchor: .bottom)
         }
     }
 }
