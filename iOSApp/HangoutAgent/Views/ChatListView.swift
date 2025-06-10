@@ -46,7 +46,18 @@ struct ChatListView: View {
                     VStack {
                         if let user = vm.signedInUser {
                             let userChatbots = vm.chatbots.filter { user.subscriptions.contains($0.id) }
-                            if userChatbots.isEmpty {
+                            
+                            let sortedChatbots = userChatbots.sorted { chatbot1, chatbot2 in
+                                let chat1 = vm.chats.first { $0.chatbotID == chatbot1.id && $0.userID == user.id }
+                                let chat2 = vm.chats.first { $0.chatbotID == chatbot2.id && $0.userID == user.id }
+
+                                let lastMessageTime1 = chat1?.messages.last?.timestamp ?? .distantPast
+                                let lastMessageTime2 = chat2?.messages.last?.timestamp ?? .distantPast
+                                
+                                return lastMessageTime1 > lastMessageTime2
+                            }
+
+                            if sortedChatbots.isEmpty {
                                 VStack(spacing: 20) {
                                     Image(systemName: "message")
                                         .font(.system(size: 60))
@@ -76,7 +87,7 @@ struct ChatListView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding(.top, 100)
                             } else {
-                                ForEach(userChatbots) { chatbot in
+                                ForEach(sortedChatbots) { chatbot in
                                     let chat = vm.chats.first(where: { $0.chatbotID == chatbot.id && $0.userID == user.id })
                                     ChatRowWithNavigation(chatbot: chatbot, user: user, chat: chat)
                                         .padding(.horizontal)
