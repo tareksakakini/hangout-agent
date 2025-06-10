@@ -60,6 +60,9 @@ struct ChatView: View {
                 }
                 .onChange(of: chat?.messages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
+                    if let chat {
+                        vm.markChatMessagesAsRead(chatId: chat.id)
+                    }
                 }
                 .onAppear {
                     Task {
@@ -120,7 +123,9 @@ struct ChatView: View {
             )
         }
         .onDisappear {
-            // No longer stopping the listener here
+            if let chat {
+                vm.markChatMessagesAsRead(chatId: chat.id)
+            }
         }
         .onAppear {
             logChatState()

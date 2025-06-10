@@ -13,6 +13,7 @@ import PhotosUI
 struct ChatRow: View {
     let chatbot: Chatbot
     let chat: Chat?
+    let unreadCount: Int
     @EnvironmentObject private var vm: ViewModel
     
     var body: some View {
@@ -25,6 +26,21 @@ struct ChatRow: View {
                     Image(systemName: "bubbles.and.sparkles.fill")
                         .font(.system(size: 28, weight: .medium))
                         .foregroundColor(.blue)
+                )
+                .overlay(
+                    ZStack {
+                        if unreadCount > 0 {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Text("\(min(unreadCount, 99))")
+                                        .font(.caption2)
+                                        .foregroundColor(.white)
+                                )
+                                .offset(x: 18, y: -18)
+                        }
+                    }
                 )
             
             VStack(alignment: .leading, spacing: 4) {

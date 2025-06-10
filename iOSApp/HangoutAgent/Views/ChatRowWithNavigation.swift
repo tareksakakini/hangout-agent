@@ -16,9 +16,10 @@ struct ChatRowWithNavigation: View {
     @EnvironmentObject private var vm: ViewModel
     
     var body: some View {
+        let unreadCount = vm.chatUnreadCounts[chat?.id ?? ""] ?? 0
         HStack {
             NavigationLink(destination: ChatView(user: user, chatbot: chatbot)) {
-                ChatRow(chatbot: chatbot, chat: chat)
+                ChatRow(chatbot: chatbot, chat: chat, unreadCount: unreadCount)
             }
             .buttonStyle(PlainButtonStyle()) // removes weird tap animation
         }

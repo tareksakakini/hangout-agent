@@ -19,6 +19,7 @@ class ViewModel: ObservableObject {
     @Published var groups: [HangoutGroup] = []
     @Published var groupMessages: [String: [GroupMessage]] = [:] // groupId -> messages
     @Published var groupUnreadCounts: [String: Int] = [:]
+    @Published var chatUnreadCounts: [String: Int] = [:]
     
     private var messageListeners: [String: ListenerRegistration] = [:]
     private var groupMessageListeners: [String: ListenerRegistration] = [:]
@@ -392,6 +393,7 @@ class ViewModel: ObservableObject {
             DispatchQueue.main.async {
                 if let index = self?.chats.firstIndex(where: { $0.id == chatId }) {
                     self?.chats[index].messages = messages
+                    self?.updateChatUnreadCount(chatId: chatId)
                 }
             }
         }
@@ -987,6 +989,25 @@ I'll be gathering everyone's availability and preferences. To get started, could
             let lastReadKey = "groupLastRead_\(userId)_\(groupId)"
             UserDefaults.standard.set(latestTimestamp, forKey: lastReadKey)
             updateUnreadCount(groupId: groupId)
+        }
+    }
+
+    private func updateChatUnreadCount(chatId: String) {
+        guard let chatIndex = chats.firstIndex(where: { $0.id == chatId }), let userId = signedInUser?.id else { return }
+        let messages = chats[chatIndex].messages
+        let lastReadKey = "chatLastRead_\(userId)_\(chatId)"
+        let lastReadDate = UserDefaults.standard.object(forKey: lastReadKey) as? Date ?? .distantPast
+        let unread = messages.filter { $0.timestamp > lastReadDate && $0.senderId != userId }.count
+        chatUnreadCounts[chatId] = unread
+    }
+
+    func markChatMessagesAsRead(chatId: String) {
+        guard let chatIndex = chats.firstIndex(where: { $0.id == chatId }), let userId = signedInUser?.id else { return }
+        let messages = chats[chatIndex].messages
+        if let latestTimestamp = messages.last?.timestamp {
+            let lastReadKey = "chatLastRead_\(userId)_\(chatId)"
+            UserDefaults.standard.set(latestTimestamp, forKey: lastReadKey)
+            updateChatUnreadCount(chatId: chatId)
         }
     }
 }
