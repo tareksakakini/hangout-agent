@@ -997,7 +997,7 @@ I'll be gathering everyone's availability and preferences. To get started, could
         let messages = chats[chatIndex].messages
         let lastReadKey = "chatLastRead_\(userId)_\(chatId)"
         let lastReadDate = UserDefaults.standard.object(forKey: lastReadKey) as? Date ?? .distantPast
-        let unread = messages.filter { $0.timestamp > lastReadDate && $0.senderId != userId }.count
+        let unread = messages.filter { $0.timestamp > lastReadDate && $0.senderId != userId && $0.eventCard == nil }.count
         chatUnreadCounts[chatId] = unread
     }
 
