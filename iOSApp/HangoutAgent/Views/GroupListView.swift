@@ -100,12 +100,14 @@ private struct GroupRow: View {
                     Text("\(lastMessage.senderName): \(lastMessage.text)")
                         .font(.subheadline)
                         .foregroundColor(.gray)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if let lastMessageText = group.lastMessage {
                     Text(lastMessageText)
                         .font(.subheadline)
                         .foregroundColor(.gray)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else {
                     Text("No messages yet")
                         .font(.subheadline)
