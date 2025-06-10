@@ -11,6 +11,8 @@ import PhotosUI
 
 struct ChatRow: View {
     let chatbot: Chatbot
+    let chat: Chat?
+    @EnvironmentObject private var vm: ViewModel
     
     var body: some View {
         HStack(spacing: 16) {
@@ -28,9 +30,19 @@ struct ChatRow: View {
                 Text(chatbot.name)
                     .font(.headline)
                     .foregroundColor(.primary)
-                Text("Tap to chat")
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
+                
+                if let lastMessage = chat?.messages.last {
+                    let senderName = getSenderName(from: lastMessage.senderId)
+                    let messagePrefix = senderName.isEmpty ? "" : "\(senderName): "
+                    Text("\(messagePrefix)\(lastMessage.text)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                } else {
+                    Text("Tap to chat")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
             }
             
             Spacer()
@@ -39,5 +51,18 @@ struct ChatRow: View {
         .background(Color.white)
         .cornerRadius(16)
         .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+    }
+    
+    private func getSenderName(from senderId: String) -> String {
+        if senderId == "chatbot" {
+            return "Agent"
+        }
+        if senderId == vm.signedInUser?.id {
+            return "You"
+        }
+        if let user = vm.users.first(where: { $0.id == senderId }) {
+            return user.username
+        }
+        return "Someone"
     }
 }

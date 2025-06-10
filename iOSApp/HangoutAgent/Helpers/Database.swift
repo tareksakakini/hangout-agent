@@ -178,6 +178,65 @@ class DatabaseManager {
         }
     }
     
+    func getAllChatsForUser(userId: String) async throws -> [Chat] {
+        let chatsRef = db.collection("chats")
+        let querySnapshot = try await chatsRef
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+
+        var chats: [Chat] = []
+        for document in querySnapshot.documents {
+            let data = document.data()
+            let chatId = document.documentID
+            
+            if let chatbotId = data["chatbotId"] as? String {
+                let messages = try await fetchMessages(chatId: chatId)
+                let chat = Chat(id: chatId, userID: userId, chatbotID: chatbotId, messages: messages)
+                chats.append(chat)
+            }
+        }
+        return chats
+    }
+    
+    func listenToUserChats(userId: String, onUpdate: @escaping (_ added: [Chat], _ modified: [Chat], _ removed: [Chat]) -> Void) -> ListenerRegistration {
+        let chatsRef = db.collection("chats").whereField("userId", isEqualTo: userId)
+        
+        return chatsRef.addSnapshotListener { querySnapshot, error in
+            guard let snapshot = querySnapshot else {
+                print("Error fetching chat snapshots: \(error!)")
+                return
+            }
+            
+            var addedChats: [Chat] = []
+            var modifiedChats: [Chat] = []
+            var removedChats: [Chat] = []
+
+            snapshot.documentChanges.forEach { diff in
+                guard let chatbotId = diff.document.data()["chatbotId"] as? String else { return }
+                let chat = Chat(
+                    id: diff.document.documentID,
+                    userID: userId,
+                    chatbotID: chatbotId,
+                    messages: [] // Messages will be handled by a separate listener
+                )
+
+                if (diff.type == .added) {
+                    addedChats.append(chat)
+                }
+                if (diff.type == .modified) {
+                    modifiedChats.append(chat)
+                }
+                if (diff.type == .removed) {
+                    removedChats.append(chat)
+                }
+            }
+            
+            DispatchQueue.main.async {
+                onUpdate(addedChats, modifiedChats, removedChats)
+            }
+        }
+    }
+    
     // MARK: - Update Functions
     
     func addSubscriptionToUser(uid: String, chatbotId: String) async throws {

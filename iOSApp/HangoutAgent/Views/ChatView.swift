@@ -66,9 +66,6 @@ struct ChatView: View {
                         if chat == nil {
                             _ = await vm.fetchOrCreateChat(userId: user.id, chatbotId: chatbot.id)
                         }
-                        if let chat = chat {
-                            vm.startListeningToMessages(chatId: chat.id)
-                        }
                     }
                 }
             }
@@ -123,9 +120,7 @@ struct ChatView: View {
             )
         }
         .onDisappear {
-            if let chat = chat {
-                vm.stopListeningToMessages(chatId: chat.id)
-            }
+            // No longer stopping the listener here
         }
         .onAppear {
             logChatState()

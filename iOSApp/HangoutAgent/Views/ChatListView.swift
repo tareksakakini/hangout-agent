@@ -77,7 +77,8 @@ struct ChatListView: View {
                                 .padding(.top, 100)
                             } else {
                                 ForEach(userChatbots) { chatbot in
-                                    ChatRowWithNavigation(chatbot: chatbot, user: user)
+                                    let chat = vm.chats.first(where: { $0.chatbotID == chatbot.id && $0.userID == user.id })
+                                    ChatRowWithNavigation(chatbot: chatbot, user: user, chat: chat)
                                         .padding(.horizontal)
                                         .padding(.vertical, 4)
                                 }

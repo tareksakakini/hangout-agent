@@ -21,6 +21,7 @@ class ViewModel: ObservableObject {
     
     private var messageListeners: [String: ListenerRegistration] = [:]
     private var groupMessageListeners: [String: ListenerRegistration] = [:]
+    private var userChatsListener: ListenerRegistration?
     
     init() {
         Task {
@@ -28,6 +29,7 @@ class ViewModel: ObservableObject {
             await fetchAllUsers()
             await fetchAllChatbots()
             await loadGroupsForUser()
+            startListeningToUserChats()
         }
     }
     
@@ -175,14 +177,17 @@ class ViewModel: ObservableObject {
     }
     
     func fetchOrCreateChat(userId: String, chatbotId: String) async -> Chat? {
+        // Check if chat already exists locally
+        if let existingChat = chats.first(where: { $0.userID == userId && $0.chatbotID == chatbotId }) {
+            return existingChat
+        }
+        
+        // If not, fetch or create from Firestore
         do {
             let firestoreService = DatabaseManager()
-            let chat = try await firestoreService.fetchOrCreateChat(userId: userId, chatbotId: chatbotId)
-            DispatchQueue.main.async {
-                self.chats.append(chat)
-                self.startListeningToMessages(chatId: chat.id)
-            }
-            return chat
+            // This will create the chat in Firestore if it doesn't exist.
+            // The userChatsListener will automatically pick it up and add it to the local array.
+            return try await firestoreService.fetchOrCreateChat(userId: userId, chatbotId: chatbotId)
         } catch {
             print("Error fetching or creating chat: \(error)")
             return nil
@@ -928,5 +933,40 @@ I'm your hangout planning assistant! I'm here to help coordinate a fun get-toget
 
 I'll be gathering everyone's availability and preferences. To get started, could you let me know if and when you're available during this time period? 😊
 """
+    }
+    
+    func startListeningToUserChats() {
+        guard let user = signedInUser else { return }
+        let firestoreService = DatabaseManager()
+
+        userChatsListener?.remove()
+        userChatsListener = firestoreService.listenToUserChats(userId: user.id) { [weak self] (addedChats, modifiedChats, removedChats) in
+            guard let self = self else { return }
+            
+            // Handle added chats
+            for chat in addedChats {
+                if !self.chats.contains(where: { $0.id == chat.id }) {
+                    self.chats.append(chat)
+                    self.startListeningToMessages(chatId: chat.id)
+                }
+            }
+            
+            // Handle modified chats
+            for chat in modifiedChats {
+                if let index = self.chats.firstIndex(where: { $0.id == chat.id }) {
+                    let existingMessages = self.chats[index].messages
+                    self.chats[index] = chat
+                    self.chats[index].messages = existingMessages
+                }
+            }
+
+            // Handle removed chats
+            for chat in removedChats {
+                if let index = self.chats.firstIndex(where: { $0.id == chat.id }) {
+                    self.stopListeningToMessages(chatId: chat.id)
+                    self.chats.remove(at: index)
+                }
+            }
+        }
     }
 }
