@@ -18,6 +18,7 @@ class ViewModel: ObservableObject {
     @Published var chats: [Chat] = []
     @Published var groups: [HangoutGroup] = []
     @Published var groupMessages: [String: [GroupMessage]] = [:] // groupId -> messages
+    @Published var groupUnreadCounts: [String: Int] = [:]
     
     private var messageListeners: [String: ListenerRegistration] = [:]
     private var groupMessageListeners: [String: ListenerRegistration] = [:]
@@ -582,6 +583,7 @@ class ViewModel: ObservableObject {
                 
                 DispatchQueue.main.async {
                     self?.groupMessages[groupId] = messages
+                    self?.updateUnreadCount(groupId: groupId)
                 }
             }
         
@@ -967,6 +969,24 @@ I'll be gathering everyone's availability and preferences. To get started, could
                     self.chats.remove(at: index)
                 }
             }
+        }
+    }
+    
+    // MARK: - Unread Message Helpers
+    private func updateUnreadCount(groupId: String) {
+        guard let messages = groupMessages[groupId], let userId = signedInUser?.id else { return }
+        let lastReadKey = "groupLastRead_\(userId)_\(groupId)"
+        let lastReadDate = UserDefaults.standard.object(forKey: lastReadKey) as? Date ?? .distantPast
+        let unread = messages.filter { $0.timestamp > lastReadDate }.count
+        groupUnreadCounts[groupId] = unread
+    }
+
+    func markGroupMessagesAsRead(groupId: String) {
+        guard let messages = groupMessages[groupId], let userId = signedInUser?.id else { return }
+        if let latestTimestamp = messages.last?.timestamp {
+            let lastReadKey = "groupLastRead_\(userId)_\(groupId)"
+            UserDefaults.standard.set(latestTimestamp, forKey: lastReadKey)
+            updateUnreadCount(groupId: groupId)
         }
     }
 }

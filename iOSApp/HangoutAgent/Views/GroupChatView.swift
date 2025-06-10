@@ -31,6 +31,7 @@ struct GroupChatView: View {
                 }
                 .onChange(of: groupMessages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
+                    vm.markGroupMessagesAsRead(groupId: group.id)
                 }
             }
             textbox
@@ -86,6 +87,7 @@ struct GroupChatView: View {
         }
         .onDisappear {
             vm.stopListeningToGroupMessages(groupId: group.id)
+            vm.markGroupMessagesAsRead(groupId: group.id)
         }
     }
     

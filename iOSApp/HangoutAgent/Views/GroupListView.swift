@@ -77,6 +77,7 @@ struct GroupListView: View {
 private struct GroupRow: View {
     let group: HangoutGroup
     let lastMessage: GroupMessage?
+    let unreadCount: Int
     
     var body: some View {
         HStack(spacing: 16) {
@@ -88,6 +89,21 @@ private struct GroupRow: View {
                     Image(systemName: "person.3.fill")
                         .font(.title3)
                         .foregroundColor(.green)
+                )
+                .overlay(
+                    ZStack {
+                        if unreadCount > 0 {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 20, height: 20)
+                                .overlay(
+                                    Text("\(min(unreadCount, 99))")
+                                        .font(.caption2)
+                                        .foregroundColor(.white)
+                                )
+                                .offset(x: 18, y: -18)
+                        }
+                    }
                 )
             
             VStack(alignment: .leading, spacing: 4) {
@@ -156,11 +172,12 @@ private struct GroupRowWithNavigation: View {
     
     var body: some View {
         let lastMessage = vm.groupMessages[group.id]?.last
+        let unreadCount = vm.groupUnreadCounts[group.id] ?? 0
         HStack {
             Button(action: {
                 selectedGroup = group
             }) {
-                GroupRow(group: group, lastMessage: lastMessage)
+                GroupRow(group: group, lastMessage: lastMessage, unreadCount: unreadCount)
             }
             .buttonStyle(PlainButtonStyle()) // removes weird tap animation
         }
