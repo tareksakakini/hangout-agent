@@ -27,9 +27,17 @@ struct ChatRow: View {
                 )
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(chatbot.name)
-                    .font(.headline)
-                    .foregroundColor(.primary)
+                HStack {
+                    Text(chatbot.name)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if let lastMessage = chat?.messages.last {
+                        Text(format(timestamp: lastMessage.timestamp))
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                    }
+                }
                 
                 if let lastMessage = chat?.messages.last {
                     let senderName = getSenderName(from: lastMessage.senderId)
@@ -51,6 +59,18 @@ struct ChatRow: View {
         .background(Color.white)
         .cornerRadius(16)
         .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+    }
+    
+    private func format(timestamp: Date) -> String {
+        let formatter = DateFormatter()
+        if Calendar.current.isDateInToday(timestamp) {
+            formatter.dateFormat = "h:mm a"
+        } else if Calendar.current.isDateInYesterday(timestamp) {
+            return "Yesterday"
+        } else {
+            formatter.dateFormat = "M/d/yy"
+        }
+        return formatter.string(from: timestamp)
     }
     
     private func getSenderName(from senderId: String) -> String {
