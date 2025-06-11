@@ -61,6 +61,9 @@ struct ChatView: View {
                 .onAppear {
                     // Auto-scroll to bottom when opening chat
                     scrollToBottom(using: scrollViewProxy)
+                    if let chat {
+                        vm.setActiveChat(chat.id)
+                    }
                 }
                 .onChange(of: chat?.messages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
@@ -129,6 +132,7 @@ struct ChatView: View {
         .onDisappear {
             if let chat {
                 vm.markChatMessagesAsRead(chatId: chat.id)
+                vm.setActiveChat(nil)
             }
         }
         .onAppear {

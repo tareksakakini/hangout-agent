@@ -32,6 +32,7 @@ struct GroupChatView: View {
                 .onAppear {
                     // Ensure we start at the bottom when the chat first opens
                     scrollToBottom(using: scrollViewProxy)
+                    vm.setActiveGroup(group.id)
                 }
                 .onChange(of: groupMessages.count) { oldValue, newValue in
                     scrollToBottom(using: scrollViewProxy)
@@ -92,6 +93,7 @@ struct GroupChatView: View {
         .onDisappear {
             vm.stopListeningToGroupMessages(groupId: group.id)
             vm.markGroupMessagesAsRead(groupId: group.id)
+            vm.setActiveGroup(nil)
         }
     }
     

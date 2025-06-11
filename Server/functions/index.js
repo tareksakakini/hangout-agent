@@ -1349,8 +1349,14 @@ exports.onGroupMessageCreate = functions.firestore
       const groupData = groupDoc.data();
       const participants = groupData.participants || [];
 
-      // Determine recipients (exclude sender)
-      const recipientIds = participants.filter(id => id !== message.senderId);
+      // Determine recipients (exclude sender) and skip anyone actively viewing this group
+      const candidateIds = participants.filter(id => id !== message.senderId);
+      const presenceChecks = await Promise.all(candidateIds.map(async uid => {
+        const userDoc = await db.collection('users').doc(uid).get();
+        const activeGroupId = userDoc.data()?.activeGroupId;
+        return { uid, isActive: activeGroupId === groupId };
+      }));
+      const recipientIds = presenceChecks.filter(p => !p.isActive).map(p => p.uid);
       if (recipientIds.length === 0) return null;
 
       const heading = groupData.name || 'New Group Message';
@@ -1365,6 +1371,59 @@ exports.onGroupMessageCreate = functions.firestore
       await sendPushNotificationToUsers(recipientIds, heading, content, { groupId, messageId: message.id });
     } catch (error) {
       console.error('❌ Error processing onGroupMessageCreate trigger:', error);
+    }
+
+    return null;
+  });
+
+// Firestore trigger: notify user when chatbot sends a message in 1-on-1 chat
+exports.onChatbotMessageCreate = functions.firestore
+  .document('chats/{chatId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const chatId = context.params.chatId;
+
+    if (!message || message.side !== 'bot') return null; // only handle bot messages
+
+    try {
+      // Fetch chat meta to find recipient user and chatbot
+      const chatDoc = await db.collection('chats').doc(chatId).get();
+      if (!chatDoc.exists) return null;
+
+      const chatData = chatDoc.data();
+      const userId = chatData.userId;
+      const chatbotId = chatData.chatbotId;
+
+      // Fetch chatbot name for nicer heading
+      let heading = 'Hangout Agent';
+      if (chatbotId) {
+        const chatbotDoc = await db.collection('chatbots').doc(chatbotId).get();
+        if (chatbotDoc.exists && chatbotDoc.data().name) {
+          heading = chatbotDoc.data().name;
+        }
+      }
+
+      // Compose notification body
+      let content;
+      if (message.text && message.text.trim().length > 0) {
+        content = `${heading}: ${message.text}`;
+      } else if (message.eventCard && message.eventCard.activity) {
+        content = `${heading}: New suggestion - ${message.eventCard.activity}`;
+      } else {
+        content = `${heading} sent you a new message.`;
+      }
+
+      // Skip push if user is currently viewing this chat
+      const userDoc = await db.collection('users').doc(userId).get();
+      const activeChatId = userDoc.data()?.activeChatId;
+      if (activeChatId === chatId) {
+        console.log(`ℹ️ Skipping push – user ${userId} is active in chat ${chatId}`);
+        return null;
+      }
+
+      await sendPushNotificationToUsers([userId], heading, content, { chatId, messageId: message.id });
+    } catch (error) {
+      console.error('❌ Error processing onChatbotMessageCreate trigger:', error);
     }
 
     return null;

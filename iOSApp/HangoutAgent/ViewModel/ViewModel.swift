@@ -1019,4 +1019,41 @@ I'll be gathering everyone's availability and preferences. To get started, could
             updateChatUnreadCount(chatId: chatId)
         }
     }
+    
+    // MARK: - Presence Helpers
+    func setActiveChat(_ chatId: String?) {
+        guard let uid = signedInUser?.id else { return }
+        let userRef = Firestore.firestore().collection("users").document(uid)
+        if let chatId {
+            userRef.updateData(["activeChatId": chatId]) { error in
+                if let error = error {
+                    print("❌ Error setting activeChatId: \(error)")
+                }
+            }
+        } else {
+            userRef.updateData(["activeChatId": FieldValue.delete()]) { error in
+                if let error = error {
+                    print("❌ Error clearing activeChatId: \(error)")
+                }
+            }
+        }
+    }
+    
+    func setActiveGroup(_ groupId: String?) {
+        guard let uid = signedInUser?.id else { return }
+        let userRef = Firestore.firestore().collection("users").document(uid)
+        if let groupId {
+            userRef.updateData(["activeGroupId": groupId]) { error in
+                if let error = error {
+                    print("❌ Error setting activeGroupId: \(error)")
+                }
+            }
+        } else {
+            userRef.updateData(["activeGroupId": FieldValue.delete()]) { error in
+                if let error = error {
+                    print("❌ Error clearing activeGroupId: \(error)")
+                }
+            }
+        }
+    }
 }
