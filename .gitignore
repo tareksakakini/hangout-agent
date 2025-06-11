@@ -63,3 +63,7 @@ fastlane/test_output
 *.ipa
 *.xcuserdata
 
+
+*.p8
+
+*.certSigningRequest
