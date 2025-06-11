@@ -171,19 +171,10 @@ struct ProfileView: View {
                                         Text(user.email)
                                             .font(.system(size: 16, weight: .medium))
                                             .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
                                     }
                                     Spacer()
-                                    // Email verification status indicator
-                                    if isCurrentUser {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: user.isEmailVerified ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                                                .font(.system(size: 16, weight: .medium))
-                                                .foregroundColor(user.isEmailVerified ? .green : .orange)
-                                            Text(user.isEmailVerified ? "Verified" : "Unverified")
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundColor(user.isEmailVerified ? .green : .orange)
-                                        }
-                                    }
                                 }
                                 Rectangle()
                                     .fill(Color.black.opacity(0.05))
