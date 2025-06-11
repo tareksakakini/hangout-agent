@@ -9,6 +9,7 @@ import Foundation
 import FirebaseFirestore
 import UIKit
 import FirebaseStorage
+import OneSignalFramework
 
 @MainActor
 class ViewModel: ObservableObject {
@@ -48,6 +49,9 @@ class ViewModel: ObservableObject {
         do {
             let authUser = try await AuthManager.shared.signup(email: email, password: password)
             
+            // Register this device with OneSignal using the Firebase UID as the external user id
+            OneSignal.login(authUser.uid)
+            
             // Automatically detect user's timezone
             let userTimezone = TimezoneHelper.getCurrentTimezone()
             print("🌍 Detected user timezone: \(userTimezone)")
@@ -66,6 +70,9 @@ class ViewModel: ObservableObject {
     func signinButtonPressed(email: String, password: String) async -> User? {
         do {
             let authUser = try await AuthManager.shared.signin(email: email, password: password)
+            
+            // Ensure the device is linked to the correct OneSignal external user id
+            OneSignal.login(authUser.uid)
             
             // Reload user to get latest verification status
             try await AuthManager.shared.reloadUser()
@@ -276,6 +283,8 @@ class ViewModel: ObservableObject {
     func signoutButtonPressed() async {
         do {
             try AuthManager.shared.signout()
+            // Remove external user id from OneSignal so this device no longer receives user-specific pushes
+            OneSignal.logout()
             DispatchQueue.main.async {
                 self.signedInUser = nil
             }

@@ -14,6 +14,10 @@ const unsplash = {
   accessKey: functions.config().unsplash?.key,
 };
 
+// OneSignal configuration (set via Firebase CLI: firebase functions:config:set onesignal.app_id="YOUR_APP_ID" onesignal.api_key="YOUR_REST_API_KEY")
+const ONE_SIGNAL_APP_ID = functions.config().onesignal?.app_id;
+const ONE_SIGNAL_API_KEY = functions.config().onesignal?.api_key;
+
 // Function to generate the system prompt
 async function generateSystemPrompt(chatId) {
   const chatDoc = await db.collection('chats').doc(chatId).get();
@@ -1290,3 +1294,78 @@ async function fetchUnsplashImage(query) {
     return 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=500&h=300&fit=crop'; // Fallback
   }
 }
+
+// Helper: Send a push notification via OneSignal to a list of external user IDs
+async function sendPushNotificationToUsers(userIds, heading, content, data = {}) {
+  if (!ONE_SIGNAL_APP_ID || !ONE_SIGNAL_API_KEY) {
+    console.error('❌ OneSignal credentials are missing. Skipping push notification.');
+    return;
+  }
+
+  if (!userIds || userIds.length === 0) {
+    console.warn('⚠️ No user IDs provided for push notification.');
+    return;
+  }
+
+  const body = {
+    app_id: ONE_SIGNAL_APP_ID,
+    include_external_user_ids: userIds, // Assumes mobile app calls OneSignal.login(uid)
+    headings: { en: heading },
+    contents: { en: content },
+    data,
+  };
+
+  try {
+    const response = await axios.post('https://onesignal.com/api/v1/notifications', body, {
+      headers: {
+        Authorization: `Basic ${ONE_SIGNAL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    console.log(`📲 OneSignal push sent (notificationId=${response.data.id}) to ${userIds.length} users.`);
+  } catch (error) {
+    console.error('❌ Error sending OneSignal notification:', error.response?.data || error.message);
+  }
+}
+
+// Firestore trigger: notify group members when a new message is posted
+exports.onGroupMessageCreate = functions.firestore
+  .document('groups/{groupId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const groupId = context.params.groupId;
+
+    if (!message) return null;
+
+    // Ignore bot/system messages
+    const systemSenders = ['system', 'chatbot'];
+    if (systemSenders.includes(message.senderId)) return null;
+
+    try {
+      // Fetch group details
+      const groupDoc = await db.collection('groups').doc(groupId).get();
+      if (!groupDoc.exists) return null;
+
+      const groupData = groupDoc.data();
+      const participants = groupData.participants || [];
+
+      // Determine recipients (exclude sender)
+      const recipientIds = participants.filter(id => id !== message.senderId);
+      if (recipientIds.length === 0) return null;
+
+      const heading = groupData.name || 'New Group Message';
+      // Build body: "Sender: Message" or fallback
+      let content;
+      if (message.text && message.text.trim().length > 0) {
+        content = `${message.senderName || 'Someone'}: ${message.text}`;
+      } else {
+        content = `${message.senderName || 'Someone'} sent a new message.`;
+      }
+
+      await sendPushNotificationToUsers(recipientIds, heading, content, { groupId, messageId: message.id });
+    } catch (error) {
+      console.error('❌ Error processing onGroupMessageCreate trigger:', error);
+    }
+
+    return null;
+  });
