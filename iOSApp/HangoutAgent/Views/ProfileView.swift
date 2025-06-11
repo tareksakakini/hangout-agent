@@ -204,11 +204,59 @@ struct ProfileView: View {
                                             .foregroundColor(.black.opacity(0.5))
                                             .textCase(.uppercase)
                                             .tracking(0.5)
-                                        Text(user.homeCity?.isEmpty == false ? user.homeCity! : "Not set")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(user.homeCity?.isEmpty == false ? .primary : .black.opacity(0.4))
+                                        if isEditingHomeCity {
+                                            TextField("Enter your city", text: $editedHomeCity)
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(.primary)
+                                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                                .autocapitalization(.words)
+                                                .disableAutocorrection(true)
+                                                .frame(maxWidth: 200)
+                                        } else {
+                                            Text(user.homeCity?.isEmpty == false ? user.homeCity! : "Not set")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(user.homeCity?.isEmpty == false ? .primary : .black.opacity(0.4))
+                                        }
                                     }
                                     Spacer()
+                                    if isCurrentUser {
+                                        if isEditingHomeCity {
+                                            HStack(spacing: 8) {
+                                                Button(action: {
+                                                    isEditingHomeCity = false
+                                                    editedHomeCity = user.homeCity ?? ""
+                                                }) {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .font(.system(size: 18))
+                                                        .foregroundColor(.gray)
+                                                }
+                                                Button(action: {
+                                                    Task {
+                                                        await updateHomeCity()
+                                                    }
+                                                }) {
+                                                    if isUpdatingHomeCity {
+                                                        ProgressView()
+                                                            .scaleEffect(0.7)
+                                                    } else {
+                                                        Image(systemName: "checkmark.circle.fill")
+                                                            .font(.system(size: 18))
+                                                            .foregroundColor(.blue)
+                                                    }
+                                                }
+                                                .disabled(isUpdatingHomeCity || editedHomeCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                            }
+                                        } else {
+                                            Button(action: {
+                                                isEditingHomeCity = true
+                                                editedHomeCity = user.homeCity ?? ""
+                                            }) {
+                                                Image(systemName: "square.and.pencil")
+                                                    .font(.system(size: 18))
+                                                    .foregroundColor(.black.opacity(0.7))
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             .padding(28)
